@@ -1,0 +1,59 @@
+# ==========================================
+# AI Trading Framework - .gitignore
+# ==========================================
+
+# 1. Security (CRITICAL)
+# Never commit your environment variables or API keys!
+.env
+.env.local
+.env.*.local
+
+# 2. Database & Massive Data Files
+# Ignore SQLite databases to prevent bloating your git repository
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+*.db
+*.sqlite
+
+# 3. Document Library (Optional)
+# Uncomment these if you don't want to commit large PDFs/Text files downloaded by the Researcher
+# library/books/*
+# library/papers/*
+# library/earnings/*
+# library/video_summaries/*
+
+# 4. Python Cache & Compilation
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 5. Virtual Environments
+# Ignores your local python environments
+venv/
+env/
+.venv/
+.env/
+.conda/
+miniconda/
+
+# 6. IDEs and Editors
+# Ignores local editor workspace settings
+.vscode/
+.idea/
+*.swp
+*.swo
+.spyderproject
+.spyproject
+
+# 7. OS Specific Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

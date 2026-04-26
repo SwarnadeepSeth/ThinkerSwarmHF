@@ -1,0 +1,59 @@
+Microsoft (MSFT) Q3 FY2025 Earnings Report - April 30, 2025
+=====================================================
+
+QUARTERLY RESULTS (Q3 FY2025 - Ended March 31, 2025)
+--------------------------------------------
+- Revenue: $70.1 billion (up 13% YoY, 15% in constant currency)
+- EPS: $3.46 (up 18% YoY, 19% in constant currency)
+- Net Income: $25.8 billion (up 18% from $21.9 billion)
+- Operating Income: Up 16% YoY (19% in constant currency)
+
+SEGMENT PERFORMANCE
+------------------
+1. Intelligent Cloud (Azure):
+   - Azure revenue grew 33% (16 points from AI)
+   - Expected Q4 Azure growth: 34-35% in constant currency
+   - FY25 capex: $80 billion on AI data centers
+   - AI capacity constraints expected beyond June 2025
+
+2. Productivity and Business Processes:
+   - Revenue: $32.05-$32.35 billion expected (11-12% growth)
+   - Microsoft 365 Commercial: 12% growth, 7% seat growth
+   - Microsoft 365 Consumer subscribers: 87.7 million (+9%)
+   - LinkedIn revenue: +7%
+   - Dynamics 365 revenue: +16%
+
+3. More Personal Computing:
+   - Revenue expected: $12.35-$12.85 billion
+   - Windows OEM: Expected to decline mid-high single digits
+   - Search advertising: Strong growth expected
+
+GUIDANCE (Q4 FY2025)
+-------------------
+- Total Revenue: $73.15-$74.25 billion
+- Intelligent Cloud: $28.75-$29.05 billion (20-22% growth)
+- Azure AI services: Demand growing faster than capacity
+- COGS: $23.6-$23.8 billion (19-20% growth)
+- Operating expense: $18-$18.1 billion (~5% growth)
+- Operating margins: Expected up slightly YoY
+
+KEY CATALYSTS
+------------
+1. AI Leadership: Azure 33% growth with 16 points from AI services
+2. Strong commercial cloud momentum across segments
+3. $80B capex investment in AI infrastructure
+4. 87.7M Microsoft 365 subscribers (9% growth)
+5. Strong FY25 guidance signals confidence
+
+RISKS
+-----
+1. Tariff concerns: $80B AI infrastructure requires overseas imports
+2. Windows OEM declining due to inventory normalization
+3. AI capacity constraints limiting near-term growth
+4. Foreign currency headwinds (~3% impact)
+
+MANAGEMENT SENTIMENT
+-------------------
+CEO Satya Nadella: "Demand is growing faster than we can bring capacity online"
+Strong Q4 guidance shows confidence in AI-driven growth
+Focus on scaling AI infrastructure while maintaining margins
