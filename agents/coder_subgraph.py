@@ -178,99 +178,89 @@ def coder_node(state: TradingState):
     if not quant_strategy or quant_strategy.strip() == "":
         raise ValueError("No indicator request from Quant node - cannot proceed")
 
-    # LLM writes code based on quant strategy
-    llm = get_llm()
-    code_instruction = (
-        f"Write Python code to calculate these indicators for {ticker}:\n"
-        f"{quant_strategy}\n\n"
-        "Database: data/US_DB.db, table: ohlcv, columns: symbol,date,open,high,low,close,volume\n"
-        "Query ohlcv table using column 'symbol' (not 'ticker').\n"
-        "Calculate the requested indicators.\n"
-        "Print JSON output with all indicator values.\n"
-        "Include if __name__ == '__main__' block.\n"
-    )
+    # Parse indicators from quant strategy - split by commas but not inside parentheses
+    indicators = []
+    paren_level = 0
+    current_ind = ""
 
-    debug_print(f"📝 Asking LLM to write code...", verbose)
-    response = llm.invoke(code_instruction)
-    generated_code = response.content if response.content else ""
+    for char in quant_strategy:
+        if char == "(":
+            paren_level += 1
+            current_ind += char
+        elif char == ")":
+            paren_level -= 1
+            current_ind += char
+        elif char == "," and paren_level == 0:
+            if current_ind.strip():
+                name = (
+                    current_ind.strip().split("(")[0].strip().lower().replace(" ", "_")
+                )
+                indicators.append((name, current_ind.strip()))
+            current_ind = ""
+        else:
+            current_ind += char
 
-    # Clean up code blocks
-    if "```python" in generated_code:
-        generated_code = generated_code.split("```python")[1].split("```")[0]
-    elif "```" in generated_code:
-        generated_code = generated_code.split("```")[1].split("```")[0]
+    # Add last indicator
+    if current_ind.strip():
+        name = current_ind.strip().split("(")[0].strip().lower().replace(" ", "_")
+        indicators.append((name, current_ind.strip()))
 
-    if not generated_code.strip():
-        raise ValueError("LLM returned empty code - cannot generate indicators")
+    if not indicators:
+        raise ValueError("No indicators found in quant strategy")
 
-    debug_print(f"📨 Generated code preview: {generated_code[:300]}...", verbose)
+    # Generate code for each indicator separately
+    all_results = []
+    generated_files = []
 
-    # Execute the code in sandbox - with retry on errors
-    print(f"🔢 Executing generated code...")
-    max_retries = 2
-    last_error = None
+    for indicator_name, indicator_params in indicators:
+        print(f"🔢 Generating code for {indicator_name}...")
 
-    for attempt in range(max_retries):
+        llm = get_llm()
+        code_instruction = (
+            f"Write Python code for {indicator_name} indicator with params: {indicator_params}\n"
+            f"Database: data/US_DB.db, table: ohlcv, columns: symbol,date,open,high,low,close,volume\n"
+            "Use column 'symbol' for ticker.\n"
+            "Calculate {indicator_name} and print JSON output.\n"
+            "NO COMMENTS. NO DOCSTRINGS. Just code.\n"
+            "Include if __name__ == '__main__' block.\n"
+        )
+
+        response = llm.invoke(code_instruction)
+        generated_code = response.content if response.content else ""
+
+        # Clean up code blocks
+        if "```python" in generated_code:
+            generated_code = generated_code.split("```python")[1].split("```")[0]
+        elif "```" in generated_code:
+            generated_code = generated_code.split("```")[1].split("```")[0]
+
+        if not generated_code.strip():
+            print(f"⚠️ Empty code for {indicator_name}, skipping...")
+            continue
+
+        # Save to individual file
+        try:
+            indicator_file = f"indicators/{indicator_name}.py"
+            os.makedirs("indicators", exist_ok=True)
+            with open(indicator_file, "w") as f:
+                f.write(generated_code)
+            generated_files.append(indicator_file)
+            print(f"💾 Saved {indicator_file}")
+        except Exception as save_err:
+            print(f"⚠️ Could not save {indicator_name}: {save_err}")
+
+    # Execute first indicator's code for result
+    if generated_files:
+        with open(generated_files[0], "r") as f:
+            generated_code = f.read()
+
+        print(f"🔢 Executing {generated_files[0]}...")
         try:
             result = run_sandbox_code(generated_code, ticker, db_path)
-            debug_print(f"📨 Execution result: {result[:500]}...", verbose)
-            break
-        except (ValueError, SyntaxError) as e:
-            # Syntax error - try to fix
-            last_error = str(e)
-            if attempt < max_retries - 1:
-                fix_prompt = (
-                    f"Fix this Python code syntax error:\n{last_error}\n\n"
-                    f"Current code:\n{generated_code}\n\n"
-                    "Return only the fixed code, no explanations."
-                )
-                debug_print(
-                    f"📝 Fixing syntax error (attempt {attempt + 1})...", verbose
-                )
-                fix_response = llm.invoke(fix_prompt)
-                generated_code = (
-                    fix_response.content if fix_response.content else generated_code
-                )
-                if "```python" in generated_code:
-                    generated_code = generated_code.split("```python")[1].split("```")[
-                        0
-                    ]
-                elif "```" in generated_code:
-                    generated_code = generated_code.split("```")[1].split("```")[0]
-            else:
-                raise ValueError(
-                    f"Code syntax errors after {max_retries} attempts: {last_error}"
-                )
-        except RuntimeError as e:
-            # Runtime error - try to fix
-            last_error = str(e)
-            if attempt < max_retries - 1:
-                fix_prompt = (
-                    f"Fix this Python code runtime error:\n{last_error}\n\n"
-                    f"Current code:\n{generated_code}\n\n"
-                    f"Database: data/US_DB.db, table: ohlcv, columns: date,open,high,low,close,volume\n"
-                    "Return only the fixed code with no comments."
-                )
-                debug_print(
-                    f"📝 Fixing runtime error (attempt {attempt + 1})...", verbose
-                )
-                fix_response = llm.invoke(fix_prompt)
-                generated_code = (
-                    fix_response.content if fix_response.content else generated_code
-                )
-                if "```python" in generated_code:
-                    generated_code = generated_code.split("```python")[1].split("```")[
-                        0
-                    ]
-                elif "```" in generated_code:
-                    generated_code = generated_code.split("```")[1].split("```")[0]
-            else:
-                # Fall back to built-in calculator instead of failing
-                debug_print(f"⚠️ Code failed after retries, using fallback...", verbose)
-                result = calculate_indicator(ticker, quant_strategy, db_path)
-                result = json.dumps({"fallback": True, "data": result})
         except Exception as e:
-            raise
+            result = f"Execution failed: {e}"
+    else:
+        raise ValueError("No indicators could be generated")
 
     print("✅ CODER NODE COMPLETE")
 
@@ -283,27 +273,6 @@ def coder_node(state: TradingState):
     }
     node_timestamps = state.get("node_timestamps", {})
     node_timestamps["coder"] = elapsed
-
-    # Save generated code to indicators folder (relative path)
-    try:
-        indicators_dir = "indicators"
-        os.makedirs(indicators_dir, exist_ok=True)
-
-        # Extract indicator name from quant strategy
-        indicator_name = "indicator"
-        if quant_strategy:
-            first_ind = (
-                quant_strategy.split(",")[0].strip().split("(")[0].strip().lower()
-            )
-            if first_ind:
-                indicator_name = first_ind.replace(" ", "_")
-
-        indicator_file = os.path.join(indicators_dir, f"{indicator_name}.py")
-        with open(indicator_file, "w") as f:
-            f.write(generated_code)
-        print(f"💾 Saved indicator to {indicator_file}")
-    except Exception as save_err:
-        print(f"⚠️ Could not save indicator: {save_err}")
 
     return {
         "draft_code": generated_code,

@@ -3,6 +3,7 @@ import io
 import pandas as pd
 import numpy as np
 import sqlite3
+import json
 import ast
 
 # Try import optional libraries
@@ -46,6 +47,7 @@ def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
         "pd": pd,
         "np": np,
         "sqlite3": sqlite3,
+        "json": json,
     }
     safe_locals.update(optional_libs)
 
@@ -54,36 +56,39 @@ def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
     if db_path:
         safe_locals["db_path"] = db_path
 
+    safe_builtins = {
+        "print": print,
+        "range": range,
+        "len": len,
+        "sum": sum,
+        "abs": abs,
+        "min": min,
+        "max": max,
+        "round": round,
+        "pow": pow,
+        "float": float,
+        "int": int,
+        "bool": bool,
+        "list": list,
+        "dict": dict,
+        "str": str,
+        "zip": zip,
+        "slice": slice,
+        "type": type,
+        "isinstance": isinstance,
+        "Exception": Exception,
+        "ValueError": ValueError,
+        "TypeError": TypeError,
+        "KeyError": KeyError,
+        "IndexError": IndexError,
+    }
+
     safe_globals = {
-        "__builtins__": {
-            "print": print,
-            "range": range,
-            "len": len,
-            "sum": sum,
-            "abs": abs,
-            "min": min,
-            "max": max,
-            "round": round,
-            "pow": pow,
-            "float": float,
-            "int": int,
-            "bool": bool,
-            "list": list,
-            "dict": dict,
-            "str": str,
-            "zip": zip,
-            "slice": slice,
-            "type": type,
-            "isinstance": isinstance,
-            "Exception": Exception,
-            "ValueError": ValueError,
-            "TypeError": TypeError,
-            "KeyError": KeyError,
-            "IndexError": IndexError,
-            "__import__": __import__,
-        },
+        "__builtins__": safe_builtins,
         "__name__": "__main__",
     }
+
+    safe_locals.update(safe_locals)
 
     old_stdout = sys.stdout
     redirected_output = sys.stdout = io.StringIO()

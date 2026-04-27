@@ -1,65 +1,33 @@
 
-#!/usr/bin/env python
-"""
-Calculate a set of technical indicators for META from a SQLite OHLCV database.
-
-Indicators
-----------
-* RSI(14)
-* MACD(12,26,9) – MACD line, signal line and histogram
-* Bollinger Bands (20, 2) – lower, middle, upper
-* ATR(14)
-* GARCH(1,1) – conditional volatility of log‑returns
-* ADX(14)
-* EMA(20)
-
-The script reads the table ``ohlcv`` from ``data/US_DB.db`` (column *symbol*,
-*date*, *open*, *high*, *low*, *close*, *volume*), computes the series and
-outputs a JSON document that contains the date and every indicator value.
-"""
-
-import json
 import sqlite3
-from pathlib import Path
-
 import pandas as pd
+import json
 
-# ----------------------------------------------------------------------
-# 3rd‑party libraries used for the calculations
-# ----------------------------------------------------------------------
-#   pandas‑ta  :  pip install pandas-ta
-#   arch       :  pip install arch
-# If you do not have them, install before running the script.
-# ----------------------------------------------------------------------
-import pandas_ta as ta
-from arch import arch_model
-
-
-def load_ohlcv(db_path: Path, symbol: str) -> pd.DataFrame:
-    """Read OHLCV rows for *symbol* from the SQLite DB."""
-    sql = """
-        SELECT date, open, high, low, close, volume
-        FROM ohlcv
-        WHERE symbol = ?
-        ORDER BY date
-    """
-    conn = sqlite3.connect(db_path)
-    df = pd.read_sql_query(sql, conn, params=(symbol,))
-    conn.close()
+def compute_rsi(df, period=14):
+    delta = df['close'].diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(to_replace=0, method='ffill')
+    rsi = 100 - (100 / (1 + rs))
+    df['rsi'] = rsi
     return df
 
-
-# ----------------------------------------------------------------------
-# Helper functions for the technical indicators
-# ----------------------------------------------------------------------
-def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Calculate all required technical indicators and return a DataFrame."""
-    df = df.copy()
-    df.set_index('date', inplace=True)
-
-    # RSI
-    df['RSI_14'] = ta.rsi(df['close'], length=14)
-
-    # MACD
-    macd = ta.macd(df['close'], fast=12, slow=26, signal=9)
-    df['MACD'] = mac
+if __name__ == '__main__':
+    con = sqlite3.connect('data/US_DB.db')
+    query = "SELECT symbol, date, close FROM ohlcv"
+    data = pd.read_sql_query(query, con)
+    con.close()
+    data['date'] = pd.to_datetime(data['date'])
+    results = []
+    for symbol, grp in data.groupby('symbol'):
+        grp = grp.sort_values('date').reset_index(drop=True)
+        grp = compute_rsi(grp, period=14)
+        for _, row in grp.dropna(subset=['rsi']).iterrows():
+            results.append({
+                "symbol": symbol,
+                "date": row['date'].strftime('%Y-%m-%d'),
+                "rsi": round(row['rsi'], 2)
+            })
+    print(json.dumps(results, indent=2))
