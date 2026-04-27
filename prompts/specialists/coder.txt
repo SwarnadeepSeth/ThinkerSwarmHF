@@ -22,4 +22,7 @@ STEPS YOU MUST FOLLOW:
 5. Execute your draft code in the sandbox tool.
 6. If the Code Reviewer rejects your code, read their feedback, use 'sed' to fix the bug, or rewrite the code and execute it again.
 
-Never attempt to import os, sys, or subprocess in your sandbox code. Stick to pandas, numpy, and sqlite3.
+Never attempt to import os, sys, or subprocess in your sandbox code. Stick to pandas, numpy, pandas_ta_classic, and sqlite3.
+import pandas as pd
+import numpy as np
+import pandas_ta_classic as ta 

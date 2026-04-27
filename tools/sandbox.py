@@ -21,7 +21,7 @@ def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
     code_lower = code.lower()
 
     # Check for only truly forbidden imports
-    forbidden = ["ta-lib", "TA-Lib", "pandas_ta"]
+    forbidden = ["ta-lib", "TA-Lib"]
     for f in forbidden:
         if f in code_lower:
             raise ImportError(f"Code contains forbidden import: {f}")
@@ -81,7 +81,8 @@ def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
             "KeyError": KeyError,
             "IndexError": IndexError,
             "__import__": __import__,
-        }
+        },
+        "__name__": "__main__",
     }
 
     old_stdout = sys.stdout

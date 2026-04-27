@@ -7,6 +7,7 @@ from agents.utils import load_prompt
 import sqlite3
 import time
 import json
+import os
 
 
 def debug_print(msg: str, verbose: bool):
@@ -180,52 +181,14 @@ def coder_node(state: TradingState):
     # LLM writes code based on quant strategy
     llm = get_llm()
     code_instruction = (
-        f"Write simple Python code to calculate indicators: {quant_strategy}\n\n"
-        "Use this TEMPLATE - fill in the function calls:\n\n"
-        "import sqlite3\n"
-        "import pandas as pd\n"
-        "import numpy as np\n"
-        "import json\n\n"
-        "con = sqlite3.connect('data/US_DB.db')\n"
-        "df = pd.read_sql('SELECT * FROM ohlcv WHERE symbol = ? ORDER BY date DESC LIMIT 50', con, params=('TICKER',))\n"
-        "con.close()\n"
-        "df = df.sort_values('date')\n\n"
-        "# Calculate indicators\n"
-        "close = df['close'].astype(float)\n"
-        "high = df['high'].astype(float)\n"
-        "low = df['low'].astype(float)\n"
-        "volume = df['volume'].astype(float)\n\n"
-        "results = {'ticker': 'TICKER'}\n\n"
-        "# RSI(14)\n"
-        "delta = close.diff()\n"
-        "gain = delta.where(delta > 0, 0).rolling(14).mean()\n"
-        "loss = (-delta.where(delta < 0, 0)).rolling(14).mean()\n"
-        "rs = gain / loss\n"
-        "results['rsi_14'] = round(100 - (100 / (1 + rs)), 2)\n\n"
-        "# SMA(20), SMA(50)\n"
-        "results['sma_20'] = round(close.rolling(20).mean().iloc[-1], 2)\n"
-        "results['sma_50'] = round(close.rolling(50).mean().iloc[-1], 2)\n\n"
-        "# EMA(12), EMA(26)\n"
-        "results['ema_12'] = round(close.ewm(span=12).mean().iloc[-1], 2)\n"
-        "results['ema_26'] = round(close.ewm(span=26).mean().iloc[-1], 2)\n\n"
-        "# MACD\n"
-        "macd = results['ema_12'] - results['ema_26']\n"
-        "signal = close.ewm(span=9).mean().iloc[-1]\n"
-        "results['macd'] = round(macd, 2)\n"
-        "results['macd_signal'] = round(signal, 2)\n"
-        "results['macd_hist'] = round(macd - signal, 2)\n\n"
-        "# Bollinger Bands\n"
-        "sma20 = close.rolling(20).mean()\n"
-        "std = close.rolling(20).std()\n"
-        "results['bb_upper'] = round((sma20 + 2*std).iloc[-1], 2)\n"
-        "results['bb_middle'] = round(sma20.iloc[-1], 2)\n"
-        "results['bb_lower'] = round((sma20 - 2*std).iloc[-1], 2)\n\n"
-        "# ATR\n"
-        "tr = np.maximum(high - low, np.maximum(abs(high - close.shift(1)), abs(low - close.shift(1))))\n"
-        "results['atr_14'] = round(tr.rolling(14).mean().iloc[-1], 2)\n\n"
-        "results['close'] = round(close.iloc[-1], 2)\n"
-        "print(json.dumps(results))\n"
-    ).replace("TICKER", ticker)
+        f"Write Python code to calculate these indicators for {ticker}:\n"
+        f"{quant_strategy}\n\n"
+        "Database: data/US_DB.db, table: ohlcv, columns: symbol,date,open,high,low,close,volume\n"
+        "Query ohlcv table using column 'symbol' (not 'ticker').\n"
+        "Calculate the requested indicators.\n"
+        "Print JSON output with all indicator values.\n"
+        "Include if __name__ == '__main__' block.\n"
+    )
 
     debug_print(f"📝 Asking LLM to write code...", verbose)
     response = llm.invoke(code_instruction)
@@ -320,6 +283,27 @@ def coder_node(state: TradingState):
     }
     node_timestamps = state.get("node_timestamps", {})
     node_timestamps["coder"] = elapsed
+
+    # Save generated code to indicators folder (relative path)
+    try:
+        indicators_dir = "indicators"
+        os.makedirs(indicators_dir, exist_ok=True)
+
+        # Extract indicator name from quant strategy
+        indicator_name = "indicator"
+        if quant_strategy:
+            first_ind = (
+                quant_strategy.split(",")[0].strip().split("(")[0].strip().lower()
+            )
+            if first_ind:
+                indicator_name = first_ind.replace(" ", "_")
+
+        indicator_file = os.path.join(indicators_dir, f"{indicator_name}.py")
+        with open(indicator_file, "w") as f:
+            f.write(generated_code)
+        print(f"💾 Saved indicator to {indicator_file}")
+    except Exception as save_err:
+        print(f"⚠️ Could not save indicator: {save_err}")
 
     return {
         "draft_code": generated_code,

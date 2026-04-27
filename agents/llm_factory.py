@@ -5,11 +5,9 @@ from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 def get_llm(model_name: str = None, temperature: float = 0.7, max_retries: int = 3):
     """Initializes the NVIDIA NIM endpoint with automatic retry for rate limits."""
-    api_key = os.getenv("NVIDIA_API_KEY")
+    api_key = os.getenv("NVIDIA_API_KEY") or os.getenv("OPENAI_API_KEY")
 
     if model_name is None:
-        # model_name = "deepseek-ai/deepseek-v4-flash"
-        #model_name = "z-ai/glm4.7"
         model_name = "openai/gpt-oss-120b"
 
     base_llm = ChatNVIDIA(model=model_name, temperature=temperature, api_key=api_key)
