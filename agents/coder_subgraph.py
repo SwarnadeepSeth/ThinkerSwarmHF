@@ -6,6 +6,13 @@ from tools.file_tools import tool_cat, tool_grep, tool_ls, tool_sed_replace
 from agents.utils import load_prompt
 import sqlite3
 import time
+from langgraph.graph import StateGraph, START, END
+from core.state import TradingState
+from agents.llm_factory import get_llm
+from tools.sandbox import run_sandbox_code
+from tools.file_tools import tool_cat, tool_grep, tool_ls, tool_sed_replace
+from agents.utils import load_prompt
+import sqlite3
 
 
 def debug_print(msg: str, verbose: bool):
@@ -179,15 +186,12 @@ def coder_node(state: TradingState):
     # LLM writes code based on quant strategy
     llm = get_llm()
     code_instruction = (
-        f"Write Python code to calculate the following technical indicators for {ticker}:\n"
+        f"Write Python code to calculate these for {ticker}:\n"
         f"{quant_strategy}\n\n"
-        "ONLY use these libraries (already available): sqlite3, pandas, numpy, datetime, json\n"
-        "DO NOT use: arch, ta, pandas_ta, or any other library.\n\n"
-        "1. Connect to data/US_DB.db using sqlite3.connect()\n"
-        "2. Query: SELECT date, open, high, low, close, volume FROM ohlcv WHERE symbol = ? ORDER BY date DESC LIMIT 100\n"
-        "3. Calculate exactly the indicators requested above\n"
-        "4. Print results as JSON at the end\n\n"
-        "Complete working code only. No explanations."
+        "Use: import sqlite3, import pandas\n"
+        "Connect: sqlite3.connect('data/US_DB.db')\n"
+        "Query: SELECT date, open, high, low, close, volume FROM ohlcv WHERE symbol = ? ORDER BY date DESC LIMIT 50\n"
+        "Calculate indicators with pandas only, print(json) at end. Only code, no text."
     )
 
     debug_print(f"📝 Asking LLM to write code...", verbose)

@@ -3,24 +3,42 @@ import io
 import pandas as pd
 import numpy as np
 import sqlite3
+import ast
+import ta
+import arch
 from langchain_core.tools import tool
 
 
 def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
     """Execute python code in a restricted sandbox."""
-    # Check for forbidden imports before execution
-    forbidden = ["arch", "ta(", "pandas_ta", "TA-Lib", "technical", "ta_lib"]
     code_lower = code.lower()
+
+    # Check for only truly forbidden imports
+    forbidden = ["pandas_ta", "ta-lib", "TA-Lib"]
     for f in forbidden:
         if f in code_lower:
             raise ImportError(f"Code contains forbidden import: {f}")
+
+    # Must use allowed base libs
+    if (
+        "sqlite3" not in code_lower
+        and ("ta" not in code_lower)
+        and ("pandas" not in code_lower and "pd" not in code_lower)
+    ):
+        raise ImportError("Code must use sqlite3, pandas, or ta")
+
+    # Pre-validate Python syntax
+    try:
+        ast.parse(code)
+    except SyntaxError as e:
+        raise ValueError(f"Code has syntax error at line {e.lineno}: {e.msg}")
 
     safe_locals = {
         "pd": pd,
         "np": np,
         "sqlite3": sqlite3,
-        "datetime": __import__("datetime"),
-        "json": __import__("json"),
+        "ta": ta,
+        "arch": arch,
     }
 
     if ticker:
@@ -50,13 +68,12 @@ def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
             "type": type,
             "isinstance": isinstance,
             "Exception": Exception,
-            "AssertionError": AssertionError,
             "ValueError": ValueError,
             "TypeError": TypeError,
             "KeyError": KeyError,
             "IndexError": IndexError,
-        },
-        "__import__": __import__,
+            "__import__": __import__,
+        }
     }
 
     old_stdout = sys.stdout
@@ -64,9 +81,9 @@ def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
 
     try:
         exec(code, safe_globals, safe_locals)
-    except Exception:
+    except Exception as e:
         sys.stdout = old_stdout
-        raise
+        raise RuntimeError(f"Code execution failed: {e}")
 
     output = redirected_output.getvalue()
     sys.stdout = old_stdout

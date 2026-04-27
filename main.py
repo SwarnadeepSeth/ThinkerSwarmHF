@@ -31,6 +31,8 @@ def generate_docx_report(ticker: str, out_data: dict, decision: dict):
     # Date
     doc.add_paragraph(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     doc.add_paragraph(f"Execution Time: {out_data.get('execution_time_ms', 0):.2f} ms")
+    if out_data.get("error"):
+        doc.add_paragraph(f"Error: {out_data.get('error')}")
     doc.add_paragraph()
 
     # Executive Summary / Final Decision
@@ -67,7 +69,6 @@ def generate_docx_report(ticker: str, out_data: dict, decision: dict):
         doc.add_paragraph(f"Model: {model}")
 
         if isinstance(output, dict):
-            # Handle reviewer output which is a dict
             for k, v in output.items():
                 doc.add_paragraph(f"{k}: {v}")
         else:
@@ -96,7 +97,6 @@ def main():
     parser.add_argument(
         "--ticker", type=str, required=True, help="Stock ticker to analyze (e.g., AAPL)"
     )
-    # Defaulting the database argument to your specific file
     parser.add_argument(
         "--db", type=str, default="data/US_DB.db", help="Path to your SQLite database"
     )
@@ -106,7 +106,7 @@ def main():
 
     args = parser.parse_args()
 
-    # 1. Validate the database exists before burning LLM tokens
+    # 1. Validate the database exists
     if not os.path.exists(args.db):
         print(f"❌ Error: Database file not found at '{args.db}'")
         print("Please ensure your 'US_DB.db' is placed inside the 'data/' folder.")
@@ -121,7 +121,6 @@ def main():
     )
 
     # 2. Initialize the Shared State
-    # This seeds the LangGraph memory with your requested ticker and database
     execution_start = time.time()
     initial_state = {
         "ticker": args.ticker.upper(),
@@ -129,7 +128,6 @@ def main():
         "verbose": args.verbose,
         "iteration_count": 0,
         "coder_loop_count": 0,
-        # Initialize empty defaults for dictionary safety down the pipeline
         "market_context": "",
         "indicator_requested": "",
         "draft_code": "",
@@ -142,20 +140,18 @@ def main():
         "fundamental_analysis": {},
         "reviewer_feedback": "",
         "final_decision": {},
-        # Execution tracking for out.json
         "execution_start_time": execution_start,
         "node_timestamps": {},
         "node_outputs": {},
     }
 
     # 3. Execute the Graph
+    error_msg = None
     try:
-        # .invoke() runs the state through the nodes until it hits END
         final_state = trading_app.invoke(initial_state)
 
         print_header("🏁 FINAL TRADE SETUP APPROVED", args.verbose)
 
-        # 4. Extract and print the final structured JSON from the Reviewer
         decision = final_state.get("final_decision", {})
         if decision:
             print(json.dumps(decision, indent=4))
@@ -163,42 +159,46 @@ def main():
             print("❌ Framework completed, but no final decision was generated.")
             print("Reviewer Feedback:", final_state.get("reviewer_feedback"))
 
-        # 5. Save output to out.json
-        execution_total_time = time.time() - execution_start
-        node_timestamps = final_state.get("node_timestamps", {})
-        node_outputs = final_state.get("node_outputs", {})
-
-        # Build the steps list from node_outputs
-        steps = []
-        for node_name, output_data in node_outputs.items():
-            step_entry = {
-                "node": node_name,
-                "timestamp": node_timestamps.get(node_name, 0),
-                "llm_output": output_data.get("llm_output", ""),
-                "execution_result": output_data.get("execution_result", ""),
-                "model_used": output_data.get("model_used", "unknown"),
-            }
-            steps.append(step_entry)
-
-        out_data = {
-            "ticker": args.ticker.upper(),
-            "execution_time_ms": round(execution_total_time * 1000, 2),
-            "nodes_executed": list(node_outputs.keys()),
-            "steps": steps,
-            "final_decision": decision,
-        }
-
-        with open("out.json", "w") as f:
-            json.dump(out_data, f, indent=2)
-
-        print(f"\n💾 Output saved to out.json")
-
-        # 6. Generate DOCX report
-        generate_docx_report(args.ticker.upper(), out_data, decision)
-
     except Exception as e:
         print_header("⚠️ EXECUTION FAILED", args.verbose)
         print(f"An error occurred during agent routing: {str(e)}")
+        error_msg = str(e)
+        final_state = {}
+
+    # 4. Save output to out.json
+    execution_total_time = time.time() - execution_start
+    node_timestamps = final_state.get("node_timestamps", {}) if final_state else {}
+    node_outputs = final_state.get("node_outputs", {}) if final_state else {}
+
+    steps = []
+    for node_name, output_data in node_outputs.items():
+        step_entry = {
+            "node": node_name,
+            "timestamp": node_timestamps.get(node_name, 0),
+            "llm_output": output_data.get("llm_output", ""),
+            "execution_result": output_data.get("execution_result", ""),
+            "model_used": output_data.get("model_used", "unknown"),
+        }
+        steps.append(step_entry)
+
+    decision = final_state.get("final_decision", {}) if final_state else {}
+
+    out_data = {
+        "ticker": args.ticker.upper(),
+        "execution_time_ms": round(execution_total_time * 1000, 2),
+        "nodes_executed": list(node_outputs.keys()),
+        "steps": steps,
+        "final_decision": decision,
+        "error": error_msg if error_msg else None,
+    }
+
+    with open("out.json", "w") as f:
+        json.dump(out_data, f, indent=2)
+
+    print(f"\n💾 Output saved to out.json")
+
+    # 5. Generate DOCX report
+    generate_docx_report(args.ticker.upper(), out_data, decision)
 
 
 if __name__ == "__main__":
