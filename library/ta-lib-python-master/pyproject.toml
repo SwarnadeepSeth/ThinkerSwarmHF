@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools", "wheel", "Cython", "numpy"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "TA-Lib"
+version = "0.6.9"
+description = "Python wrapper for TA-Lib"
+readme = "README.md"
+license-files = ["LICENSE"]
+authors = [
+    {name = "John Benediktsson", email = "mrjbq7@gmail.com"}
+]
+urls = {homepage = "http://github.com/ta-lib/ta-lib-python", download = "https://github.com/ta-lib/ta-lib-python/releases"}
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Operating System :: Unix",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Cython",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Financial and Insurance Industry",
+]
+dependencies = [
+    "build",
+    "numpy",
+]
+requires-python = '>=3.9'
+
+[tool.setuptools]
+packages = ["talib"]
+package-data = {"talib" = ["_ta_lib.pyi", "py.typed", "abstract.pyi"]}

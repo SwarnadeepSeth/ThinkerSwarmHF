@@ -78,12 +78,11 @@ def quant_node(state: TradingState):
     instruction = (
         f"{system_prompt}\n\n"
         f"Ticker: {state['ticker']}. Formulate a technical strategy.\n"
-        "You MUST analyze AT LEAST 5 DIFFERENT indicators/patterns that are INDEPENDENT of each other.\n"
-        "For each indicator, also provide a brief statistical basis (e.g., historical win rate, average return, volatility). "
-        "Output in this format:\n"
-        "1. [INDICATOR_NAME]: [brief_statistical_basis]\n"
-        "2. [INDICATOR_NAME]: [brief_statistical_basis]\n"
-        "... (at least 5)"
+        "Analyze AT LEAST 5 DIFFERENT independent indicators.\n"
+        "Output as a comma-separated list (for code generation):\n"
+        "INDICATOR_NAME(PARAM1,PARAM2,...), INDICATOR_NAME(PARAM1,PARAM2,...)\n"
+        "Example: RSI(14), MACD(12,26,9), BollingerBands(20,2), ATR(14), SMA(50)\n"
+        "Only output the list, no explanations."
     )
 
     debug_print(f"📝 Calling LLM...", verbose)

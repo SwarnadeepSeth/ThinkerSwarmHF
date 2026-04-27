@@ -6,13 +6,7 @@ from tools.file_tools import tool_cat, tool_grep, tool_ls, tool_sed_replace
 from agents.utils import load_prompt
 import sqlite3
 import time
-from langgraph.graph import StateGraph, START, END
-from core.state import TradingState
-from agents.llm_factory import get_llm
-from tools.sandbox import run_sandbox_code
-from tools.file_tools import tool_cat, tool_grep, tool_ls, tool_sed_replace
-from agents.utils import load_prompt
-import sqlite3
+import json
 
 
 def debug_print(msg: str, verbose: bool):
@@ -186,13 +180,52 @@ def coder_node(state: TradingState):
     # LLM writes code based on quant strategy
     llm = get_llm()
     code_instruction = (
-        f"Write Python code to calculate these for {ticker}:\n"
-        f"{quant_strategy}\n\n"
-        "Use: import sqlite3, import pandas\n"
-        "Connect: sqlite3.connect('data/US_DB.db')\n"
-        "Query: SELECT date, open, high, low, close, volume FROM ohlcv WHERE symbol = ? ORDER BY date DESC LIMIT 50\n"
-        "Calculate indicators with pandas only, print(json) at end. Only code, no text."
-    )
+        f"Write simple Python code to calculate indicators: {quant_strategy}\n\n"
+        "Use this TEMPLATE - fill in the function calls:\n\n"
+        "import sqlite3\n"
+        "import pandas as pd\n"
+        "import numpy as np\n"
+        "import json\n\n"
+        "con = sqlite3.connect('data/US_DB.db')\n"
+        "df = pd.read_sql('SELECT * FROM ohlcv WHERE symbol = ? ORDER BY date DESC LIMIT 50', con, params=('TICKER',))\n"
+        "con.close()\n"
+        "df = df.sort_values('date')\n\n"
+        "# Calculate indicators\n"
+        "close = df['close'].astype(float)\n"
+        "high = df['high'].astype(float)\n"
+        "low = df['low'].astype(float)\n"
+        "volume = df['volume'].astype(float)\n\n"
+        "results = {'ticker': 'TICKER'}\n\n"
+        "# RSI(14)\n"
+        "delta = close.diff()\n"
+        "gain = delta.where(delta > 0, 0).rolling(14).mean()\n"
+        "loss = (-delta.where(delta < 0, 0)).rolling(14).mean()\n"
+        "rs = gain / loss\n"
+        "results['rsi_14'] = round(100 - (100 / (1 + rs)), 2)\n\n"
+        "# SMA(20), SMA(50)\n"
+        "results['sma_20'] = round(close.rolling(20).mean().iloc[-1], 2)\n"
+        "results['sma_50'] = round(close.rolling(50).mean().iloc[-1], 2)\n\n"
+        "# EMA(12), EMA(26)\n"
+        "results['ema_12'] = round(close.ewm(span=12).mean().iloc[-1], 2)\n"
+        "results['ema_26'] = round(close.ewm(span=26).mean().iloc[-1], 2)\n\n"
+        "# MACD\n"
+        "macd = results['ema_12'] - results['ema_26']\n"
+        "signal = close.ewm(span=9).mean().iloc[-1]\n"
+        "results['macd'] = round(macd, 2)\n"
+        "results['macd_signal'] = round(signal, 2)\n"
+        "results['macd_hist'] = round(macd - signal, 2)\n\n"
+        "# Bollinger Bands\n"
+        "sma20 = close.rolling(20).mean()\n"
+        "std = close.rolling(20).std()\n"
+        "results['bb_upper'] = round((sma20 + 2*std).iloc[-1], 2)\n"
+        "results['bb_middle'] = round(sma20.iloc[-1], 2)\n"
+        "results['bb_lower'] = round((sma20 - 2*std).iloc[-1], 2)\n\n"
+        "# ATR\n"
+        "tr = np.maximum(high - low, np.maximum(abs(high - close.shift(1)), abs(low - close.shift(1))))\n"
+        "results['atr_14'] = round(tr.rolling(14).mean().iloc[-1], 2)\n\n"
+        "results['close'] = round(close.iloc[-1], 2)\n"
+        "print(json.dumps(results))\n"
+    ).replace("TICKER", ticker)
 
     debug_print(f"📝 Asking LLM to write code...", verbose)
     response = llm.invoke(code_instruction)
@@ -209,10 +242,72 @@ def coder_node(state: TradingState):
 
     debug_print(f"📨 Generated code preview: {generated_code[:300]}...", verbose)
 
-    # Execute the code in sandbox - let exceptions propagate
+    # Execute the code in sandbox - with retry on errors
     print(f"🔢 Executing generated code...")
-    result = run_sandbox_code(generated_code, ticker, db_path)
-    debug_print(f"📨 Execution result: {result[:500]}...", verbose)
+    max_retries = 2
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            result = run_sandbox_code(generated_code, ticker, db_path)
+            debug_print(f"📨 Execution result: {result[:500]}...", verbose)
+            break
+        except (ValueError, SyntaxError) as e:
+            # Syntax error - try to fix
+            last_error = str(e)
+            if attempt < max_retries - 1:
+                fix_prompt = (
+                    f"Fix this Python code syntax error:\n{last_error}\n\n"
+                    f"Current code:\n{generated_code}\n\n"
+                    "Return only the fixed code, no explanations."
+                )
+                debug_print(
+                    f"📝 Fixing syntax error (attempt {attempt + 1})...", verbose
+                )
+                fix_response = llm.invoke(fix_prompt)
+                generated_code = (
+                    fix_response.content if fix_response.content else generated_code
+                )
+                if "```python" in generated_code:
+                    generated_code = generated_code.split("```python")[1].split("```")[
+                        0
+                    ]
+                elif "```" in generated_code:
+                    generated_code = generated_code.split("```")[1].split("```")[0]
+            else:
+                raise ValueError(
+                    f"Code syntax errors after {max_retries} attempts: {last_error}"
+                )
+        except RuntimeError as e:
+            # Runtime error - try to fix
+            last_error = str(e)
+            if attempt < max_retries - 1:
+                fix_prompt = (
+                    f"Fix this Python code runtime error:\n{last_error}\n\n"
+                    f"Current code:\n{generated_code}\n\n"
+                    f"Database: data/US_DB.db, table: ohlcv, columns: date,open,high,low,close,volume\n"
+                    "Return only the fixed code with no comments."
+                )
+                debug_print(
+                    f"📝 Fixing runtime error (attempt {attempt + 1})...", verbose
+                )
+                fix_response = llm.invoke(fix_prompt)
+                generated_code = (
+                    fix_response.content if fix_response.content else generated_code
+                )
+                if "```python" in generated_code:
+                    generated_code = generated_code.split("```python")[1].split("```")[
+                        0
+                    ]
+                elif "```" in generated_code:
+                    generated_code = generated_code.split("```")[1].split("```")[0]
+            else:
+                # Fall back to built-in calculator instead of failing
+                debug_print(f"⚠️ Code failed after retries, using fallback...", verbose)
+                result = calculate_indicator(ticker, quant_strategy, db_path)
+                result = json.dumps({"fallback": True, "data": result})
+        except Exception as e:
+            raise
 
     print("✅ CODER NODE COMPLETE")
 

@@ -4,8 +4,15 @@ import pandas as pd
 import numpy as np
 import sqlite3
 import ast
-import ta
-import arch
+
+# Try import optional libraries
+optional_libs = {}
+for lib_name in ["ta", "arch", "talib", "mplfinance"]:
+    try:
+        optional_libs[lib_name] = __import__(lib_name)
+    except ImportError:
+        pass
+
 from langchain_core.tools import tool
 
 
@@ -14,7 +21,7 @@ def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
     code_lower = code.lower()
 
     # Check for only truly forbidden imports
-    forbidden = ["pandas_ta", "ta-lib", "TA-Lib"]
+    forbidden = ["ta-lib", "TA-Lib", "pandas_ta"]
     for f in forbidden:
         if f in code_lower:
             raise ImportError(f"Code contains forbidden import: {f}")
@@ -22,10 +29,12 @@ def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
     # Must use allowed base libs
     if (
         "sqlite3" not in code_lower
-        and ("ta" not in code_lower)
+        and not any(lib in code_lower for lib in optional_libs.keys())
         and ("pandas" not in code_lower and "pd" not in code_lower)
     ):
-        raise ImportError("Code must use sqlite3, pandas, or ta")
+        raise ImportError(
+            "Code must use sqlite3, pandas, or other allowed libs (ta, arch, talib, mplfinance)"
+        )
 
     # Pre-validate Python syntax
     try:
@@ -37,9 +46,8 @@ def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
         "pd": pd,
         "np": np,
         "sqlite3": sqlite3,
-        "ta": ta,
-        "arch": arch,
     }
+    safe_locals.update(optional_libs)
 
     if ticker:
         safe_locals["ticker"] = ticker
@@ -96,8 +104,5 @@ def run_sandbox_code(code: str, ticker: str = None, db_path: str = None) -> str:
 
 @tool
 def execute_python_code(code: str, ticker: str = None, db_path: str = None) -> str:
-    """
-    Executes python code in a restricted sandbox.
-    Use this to run and test generated indicators against SQLite data.
-    """
+    """Executes python code in a restricted sandbox."""
     return run_sandbox_code(code, ticker, db_path)
