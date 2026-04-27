@@ -1,13 +1,11 @@
 from langgraph.graph import StateGraph, START, END
 from core.state import TradingState
 from agents.llm_factory import get_llm
-from tools.sandbox import execute_python_code
+from tools.sandbox import run_sandbox_code
 from tools.file_tools import tool_cat, tool_grep, tool_ls, tool_sed_replace
 from agents.utils import load_prompt
-
-# --- NEW MODERN IMPORTS ---
-from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import SystemMessage, HumanMessage
+import sqlite3
+import time
 
 
 def debug_print(msg: str, verbose: bool):
@@ -15,10 +13,154 @@ def debug_print(msg: str, verbose: bool):
         print(msg)
 
 
+def calculate_indicator(ticker, indicator_name, db_path):
+    """Directly calculate an indicator without agent complexity."""
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Get recent data
+        cursor.execute(
+            "SELECT date, open, high, low, close, volume FROM ohlcv WHERE symbol = ? ORDER BY date DESC LIMIT 200",
+            (ticker,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            return {"error": f"No data for {ticker}"}
+
+        import pandas as pd
+        import numpy as np
+
+        df = pd.DataFrame(
+            rows, columns=["date", "open", "high", "low", "close", "volume"]
+        )
+        close = df["close"]
+        high = df["high"]
+        low = df["low"]
+        volume = df["volume"]
+
+        results = {
+            "ticker": ticker,
+            "date": str(df.iloc[0]["date"]),
+            "close": round(df.iloc[0]["close"], 4),
+        }
+
+        indicator_name = indicator_name.upper().strip()
+
+        # Parse multiple indicators (split by newlines or commas)
+        indicators = [i.strip() for i in indicator_name.replace("\n", ",").split(",")]
+
+        for ind in indicators:
+            ind = ind.strip()
+            if not ind:
+                continue
+
+            try:
+                if "MACD" in ind:
+                    exp1 = close.ewm(span=12, adjust=False).mean()
+                    exp2 = close.ewm(span=26, adjust=False).mean()
+                    macd = exp1 - exp2
+                    signal = macd.ewm(span=9, adjust=False).mean()
+                    histogram = macd - signal
+                    results["macd"] = {
+                        "line": round(macd.iloc[0], 4),
+                        "signal_line": round(signal.iloc[0], 4),
+                        "histogram": round(histogram.iloc[0], 4),
+                        "direction": "BULLISH" if histogram.iloc[0] > 0 else "BEARISH",
+                    }
+
+                elif "EMA" in ind:
+                    # Parse EMA periods: EMA(50) -> 50
+                    period = 50
+                    if "(" in ind and ")" in ind:
+                        period = int(ind.split("(")[1].split(")")[0])
+                    ema = close.ewm(span=period, adjust=False).mean()
+                    results[f"ema_{period}"] = round(ema.iloc[0], 4)
+
+                elif "ATR" in ind:
+                    period = 14
+                    if "(" in ind and ")" in ind:
+                        period = int(ind.split("(")[1].split(")")[0])
+                    high_low = high - low
+                    high_close = abs(high - close.shift())
+                    low_close = abs(low - close.shift())
+                    tr = pd.concat([high_low, high_close, low_close], axis=1).max(
+                        axis=1
+                    )
+                    atr = tr.ewm(span=period, adjust=False).mean()
+                    results["atr"] = round(atr.iloc[0], 4)
+
+                elif "RSI" in ind:
+                    period = 14
+                    if "(" in ind and ")" in ind:
+                        period = int(ind.split("(")[1].split(")")[0])
+                    delta = close.diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+                    rs = gain / loss
+                    rsi = 100 - (100 / (1 + rs))
+                    results["rsi"] = round(rsi.iloc[0], 2)
+
+                elif "SMA" in ind or "MA" in ind:
+                    period = 20
+                    if "(" in ind and ")" in ind:
+                        period = int(ind.split("(")[1].split(")")[0])
+                    sma = close.rolling(window=period).mean()
+                    results[f"sma_{period}"] = round(sma.iloc[0], 4)
+
+                elif "BB" in ind or "BOLLINGER" in ind:
+                    period = 20
+                    std_mult = 2
+                    if "(" in ind and ")" in ind:
+                        parts = ind.split("(")[1].split(")")[0].split(",")
+                        period = int(parts[0])
+                        if len(parts) > 1:
+                            std_mult = float(parts[1])
+                    sma = close.rolling(window=period).mean()
+                    std = close.rolling(window=period).std()
+                    upper = sma + (std * std_mult)
+                    lower = sma - (std * std_mult)
+                    results["bollinger"] = {
+                        "upper": round(upper.iloc[0], 4),
+                        "middle": round(sma.iloc[0], 4),
+                        "lower": round(lower.iloc[0], 4),
+                        "position": "MIDDLE"
+                        if sma.iloc[0] < close.iloc[0] < upper.iloc[0]
+                        else "ABOVE_UPPER"
+                        if close.iloc[0] > upper.iloc[0]
+                        else "BELOW_LOWER"
+                        if close.iloc[0] < lower.iloc[0]
+                        else "MIDDLE",
+                    }
+
+                elif "VOLUME" in ind:
+                    avg_vol = volume.rolling(window=20).mean()
+                    results["volume"] = {
+                        "current": int(volume.iloc[0]),
+                        "avg_20d": int(avg_vol.iloc[0]),
+                        "ratio": round(volume.iloc[0] / avg_vol.iloc[0], 2),
+                    }
+
+                else:
+                    results[ind] = {"calculated": True}
+
+            except Exception as e:
+                results[ind] = {"error": str(e)}
+
+        return results
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def coder_node(state: TradingState):
-    """Writes code and ACTUALLY executes tools using LangGraph's native agent engine."""
+    """Generates Python code based on quant strategy, then executes it."""
     verbose = state.get("verbose", False)
     loop_count = state.get("coder_loop_count", 0)
+    start_time = time.time()
 
     print("\n" + "=" * 50)
     print("📋 CODER NODE STARTING")
@@ -26,46 +168,66 @@ def coder_node(state: TradingState):
     print(f"   Iteration: {state.get('iteration_count', 0)}")
     print(f"   Coder Loop: {loop_count + 1}")
     print("=" * 50)
-    if verbose:
-        print(f"📋 Indicator Requested: {state.get('indicator_requested', 'None')}")
-        print(f"📋 Previous Feedback: {state.get('code_review_feedback', 'None')}")
-        print(f"📋 DB Path: {state.get('db_path', 'None')}")
 
-    llm = get_llm()
-    tools = [tool_cat, tool_grep, tool_ls, tool_sed_replace, execute_python_code]
-
-    # 1. Create the modern execution engine
-    agent_executor = create_react_agent(llm, tools)
-
-    # 2. Setup the messages
-    system_prompt = load_prompt("specialists/coder")
+    ticker = state.get("ticker")
+    quant_strategy = state.get("indicator_requested", "")
     db_path = state.get("db_path", "data/US_DB.db")
-    human_prompt = (
-        f"Ticker: {state.get('ticker')}\n"
-        f"Quant request: {state.get('indicator_requested')}\n"
-        f"Feedback: {state.get('code_review_feedback')}\n"
-        f"IMPORTANT: The SQLite database is at '{db_path}'. Use this exact path in your code to connect."
+
+    if not quant_strategy or quant_strategy.strip() == "":
+        raise ValueError("No indicator request from Quant node - cannot proceed")
+
+    # LLM writes code based on quant strategy
+    llm = get_llm()
+    code_instruction = (
+        f"Write Python code to calculate the following technical indicators for {ticker}:\n"
+        f"{quant_strategy}\n\n"
+        "ONLY use these libraries (already available): sqlite3, pandas, numpy, datetime, json\n"
+        "DO NOT use: arch, ta, pandas_ta, or any other library.\n\n"
+        "1. Connect to data/US_DB.db using sqlite3.connect()\n"
+        "2. Query: SELECT date, open, high, low, close, volume FROM ohlcv WHERE symbol = ? ORDER BY date DESC LIMIT 100\n"
+        "3. Calculate exactly the indicators requested above\n"
+        "4. Print results as JSON at the end\n\n"
+        "Complete working code only. No explanations."
     )
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=human_prompt),
-    ]
+    debug_print(f"📝 Asking LLM to write code...", verbose)
+    response = llm.invoke(code_instruction)
+    generated_code = response.content if response.content else ""
 
-    debug_print(f"📝 Invoking coder agent with {len(tools)} tools...", verbose)
-    # 3. Run the tools!
-    result = agent_executor.invoke({"messages": messages})
+    # Clean up code blocks
+    if "```python" in generated_code:
+        generated_code = generated_code.split("```python")[1].split("```")[0]
+    elif "```" in generated_code:
+        generated_code = generated_code.split("```")[1].split("```")[0]
 
-    # 4. Extract the final response string from the agent's last message
-    final_output = result["messages"][-1].content
+    if not generated_code.strip():
+        raise ValueError("LLM returned empty code - cannot generate indicators")
 
-    debug_print(f"📨 Coder output: {final_output[:200]}...", verbose)
+    debug_print(f"📨 Generated code preview: {generated_code[:300]}...", verbose)
+
+    # Execute the code in sandbox - let exceptions propagate
+    print(f"🔢 Executing generated code...")
+    result = run_sandbox_code(generated_code, ticker, db_path)
+    debug_print(f"📨 Execution result: {result[:500]}...", verbose)
+
     print("✅ CODER NODE COMPLETE")
 
+    elapsed = time.time() - start_time
+    node_outputs = state.get("node_outputs", {})
+    node_outputs["coder"] = {
+        "llm_output": generated_code,
+        "execution_result": str(result),
+        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
+    }
+    node_timestamps = state.get("node_timestamps", {})
+    node_timestamps["coder"] = elapsed
+
     return {
-        "draft_code": final_output,
-        "coder_output": {"sandbox_results": final_output},
+        "draft_code": generated_code,
+        "coder_output": {"sandbox_results": str(result)},
         "coder_loop_count": loop_count + 1,
+        "node_outputs": node_outputs,
+        "node_timestamps": node_timestamps,
     }
 
 
@@ -73,6 +235,7 @@ def code_reviewer_node(state: TradingState):
     """Critiques the draft code and sandbox test outputs."""
     verbose = state.get("verbose", False)
     loop_count = state.get("coder_loop_count", 0)
+    start_time = time.time()
 
     print("\n" + "=" * 50)
     print("📋 CODE REVIEWER NODE STARTING")
@@ -94,12 +257,30 @@ def code_reviewer_node(state: TradingState):
     approved = "PASS" in response.content.upper()
     print(f"✅ CODE REVIEWER NODE COMPLETE (Approved: {approved})")
 
-    return {"code_approved": approved, "code_review_feedback": response.content}
+    elapsed = time.time() - start_time
+    node_outputs = state.get("node_outputs", {})
+    node_outputs["code_reviewer"] = {
+        "llm_output": response.content,
+        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
+    }
+    node_timestamps = state.get("node_timestamps", {})
+    node_timestamps["code_reviewer"] = elapsed
+
+    return {
+        "code_approved": approved,
+        "code_review_feedback": response.content,
+        "node_outputs": node_outputs,
+        "node_timestamps": node_timestamps,
+    }
 
 
 def coder_router(state: TradingState):
     """Routes back to the Coder if the Reviewer fails the code."""
+    loop_count = state.get("coder_loop_count", 0)
     if state.get("code_approved"):
+        return END
+    if loop_count >= 3:
+        print("⚠️ Coder loop limit reached (3), proceeding...")
         return END
     return "coder"
 

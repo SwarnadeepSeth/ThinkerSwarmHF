@@ -1,6 +1,7 @@
 from core.state import TradingState
 from agents.llm_factory import get_llm
 from agents.utils import load_prompt
+import time
 
 
 def debug_print(msg: str, verbose: bool):
@@ -11,6 +12,7 @@ def debug_print(msg: str, verbose: bool):
 def manager_node(state: TradingState):
     """The General Manager that starts the analysis."""
     verbose = state.get("verbose", False)
+    start_time = time.time()
 
     print("\n" + "=" * 50)
     print("📋 MANAGER NODE STARTING")
@@ -33,7 +35,20 @@ def manager_node(state: TradingState):
     response = llm.invoke(instruction)
     debug_print(f"📨 LLM Response received: {response.content[:200]}...", verbose)
 
-    result = {"market_context": response.content}
+    elapsed = time.time() - start_time
+    node_outputs = state.get("node_outputs", {})
+    node_outputs["manager"] = {
+        "llm_output": response.content,
+        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
+    }
+    node_timestamps = state.get("node_timestamps", {})
+    node_timestamps["manager"] = elapsed
+
+    result = {
+        "market_context": response.content,
+        "node_outputs": node_outputs,
+        "node_timestamps": node_timestamps,
+    }
     print("✅ MANAGER NODE COMPLETE")
     debug_print(f"   Output preview: {str(result)[:200]}...", verbose)
 

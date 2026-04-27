@@ -1,6 +1,7 @@
 from core.state import TradingState
 from agents.llm_factory import get_llm
 from agents.utils import load_prompt
+import time
 
 
 def debug_print(msg: str, verbose: bool):
@@ -11,9 +12,10 @@ def debug_print(msg: str, verbose: bool):
 def technical_head_node(state: TradingState):
     """Synthesizes the Quant, Bull, and Bear into a final technical outlook."""
     verbose = state.get("verbose", False)
+    start_time = time.time()
 
     print("\n" + "=" * 50)
-    print("📋 TECHNICAL HEAD NODE STARTING")
+    print("📋 TECHNICAL_HEAD NODE STARTING")
     print(f"   Ticker: {state['ticker']}")
     print(f"   Iteration: {state.get('iteration_count', 0)}")
     print("=" * 50)
@@ -46,17 +48,31 @@ def technical_head_node(state: TradingState):
     response = llm.invoke(instruction)
     debug_print(f"📨 Technical synthesis: {response.content[:200]}...", verbose)
 
-    print("✅ TECHNICAL HEAD NODE COMPLETE")
+    print("✅ TECHNICAL_HEAD NODE COMPLETE")
 
-    return {"technical_analysis": {"head_synthesis": response.content}}
+    elapsed = time.time() - start_time
+    node_outputs = state.get("node_outputs", {})
+    node_outputs["technical_head"] = {
+        "llm_output": response.content,
+        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
+    }
+    node_timestamps = state.get("node_timestamps", {})
+    node_timestamps["technical_head"] = elapsed
+
+    return {
+        "technical_analysis": {"head_synthesis": response.content},
+        "node_outputs": node_outputs,
+        "node_timestamps": node_timestamps,
+    }
 
 
 def fundamental_head_node(state: TradingState):
     """Synthesizes the fundamental data into a final intrinsic valuation outlook."""
     verbose = state.get("verbose", False)
+    start_time = time.time()
 
     print("\n" + "=" * 50)
-    print("📋 FUNDAMENTAL HEAD NODE STARTING")
+    print("📋 FUNDAMENTAL_HEAD NODE STARTING")
     print(f"   Ticker: {state['ticker']}")
     print(f"   Iteration: {state.get('iteration_count', 0)}")
     print("=" * 50)
@@ -81,6 +97,19 @@ def fundamental_head_node(state: TradingState):
     response = llm.invoke(instruction)
     debug_print(f"📨 Fundamental synthesis: {response.content[:200]}...", verbose)
 
-    print("✅ FUNDAMENTAL HEAD NODE COMPLETE")
+    print("✅ FUNDAMENTAL_HEAD NODE COMPLETE")
 
-    return {"fundamental_analysis": {"head_synthesis": response.content}}
+    elapsed = time.time() - start_time
+    node_outputs = state.get("node_outputs", {})
+    node_outputs["fundamental_head"] = {
+        "llm_output": response.content,
+        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
+    }
+    node_timestamps = state.get("node_timestamps", {})
+    node_timestamps["fundamental_head"] = elapsed
+
+    return {
+        "fundamental_analysis": {"head_synthesis": response.content},
+        "node_outputs": node_outputs,
+        "node_timestamps": node_timestamps,
+    }

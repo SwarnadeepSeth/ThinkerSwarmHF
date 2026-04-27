@@ -30,3 +30,8 @@ class TradingState(TypedDict):
 
     # Final Output Schema
     final_decision: Dict[str, Any]
+
+    # Execution tracking for out.json
+    execution_start_time: float
+    node_timestamps: Dict[str, float]
+    node_outputs: Dict[str, Any]

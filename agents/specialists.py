@@ -2,10 +2,8 @@ from core.state import TradingState
 from agents.llm_factory import get_llm
 from agents.utils import load_prompt
 from tools.file_tools import tool_grep, tool_cat
-
-# --- NEW MODERN IMPORTS ---
-from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import SystemMessage, HumanMessage
+import time
+import json
 
 
 def debug_print(msg: str, verbose: bool):
@@ -14,8 +12,9 @@ def debug_print(msg: str, verbose: bool):
 
 
 def researcher_node(state: TradingState):
-    """Parses macro data, news, and earnings from the /library using executable tools."""
+    """Parses macro data, news, and earnings from the /library."""
     verbose = state.get("verbose", False)
+    start_time = time.time()
 
     print("\n" + "=" * 50)
     print("📋 RESEARCHER NODE STARTING")
@@ -25,38 +24,47 @@ def researcher_node(state: TradingState):
     if verbose:
         print(f"📋 Market Context: {state.get('market_context', 'None')[:200]}...")
 
+    # Try to get library data directly
+    try:
+        lib_data = tool_cat("/home/swdseth/MegaSync/ThinkerSwarmHF/library/MSFT.txt")
+    except Exception as e:
+        lib_data = f"Library data unavailable: {e}"
+
     llm = get_llm()
-    tools = [tool_grep, tool_cat]
-
-    # 1. Create the modern execution engine
-    agent_executor = create_react_agent(llm, tools)
-
-    # 2. Setup the messages
     system_prompt = load_prompt("specialists/researcher")
-    human_prompt = (
-        f"Ticker: {state['ticker']}. Market Context: {state.get('market_context', 'None')}\n"
-        "Use your tools to search the library for relevant earnings and macro data and summarize the findings."
+
+    instruction = (
+        f"{system_prompt}\n\n"
+        f"Ticker: {state['ticker']}\n"
+        f"Library Data: {lib_data}\n"
+        "Summarize relevant findings for trading analysis."
     )
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=human_prompt),
-    ]
-
-    debug_print(f"📝 Invoking researcher agent with tools...", verbose)
-    # 3. Run the tools!
-    result = agent_executor.invoke({"messages": messages})
-    final_output = result["messages"][-1].content
-
-    debug_print(f"📨 Researcher output: {final_output[:200]}...", verbose)
+    debug_print(f"📝 Calling LLM...", verbose)
+    response = llm.invoke(instruction)
+    debug_print(f"📨 Researcher output: {response.content[:200]}...", verbose)
     print("✅ RESEARCHER NODE COMPLETE")
 
-    return {"fundamental_analysis": {"researcher_context": final_output}}
+    elapsed = time.time() - start_time
+    node_outputs = state.get("node_outputs", {})
+    node_outputs["researcher"] = {
+        "llm_output": response.content,
+        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
+    }
+    node_timestamps = state.get("node_timestamps", {})
+    node_timestamps["researcher"] = elapsed
+
+    return {
+        "fundamental_analysis": {"researcher_context": response.content},
+        "node_outputs": node_outputs,
+        "node_timestamps": node_timestamps,
+    }
 
 
 def quant_node(state: TradingState):
     """Designs the mathematical strategy and dictates what the Coder must build."""
     verbose = state.get("verbose", False)
+    start_time = time.time()
 
     print("\n" + "=" * 50)
     print("📋 QUANT NODE STARTING")
@@ -70,7 +78,12 @@ def quant_node(state: TradingState):
     instruction = (
         f"{system_prompt}\n\n"
         f"Ticker: {state['ticker']}. Formulate a technical strategy.\n"
-        "Output exactly the name and parameters of the mathematical indicator you need the Coder to execute."
+        "You MUST analyze AT LEAST 5 DIFFERENT indicators/patterns that are INDEPENDENT of each other.\n"
+        "For each indicator, also provide a brief statistical basis (e.g., historical win rate, average return, volatility). "
+        "Output in this format:\n"
+        "1. [INDICATOR_NAME]: [brief_statistical_basis]\n"
+        "2. [INDICATOR_NAME]: [brief_statistical_basis]\n"
+        "... (at least 5)"
     )
 
     debug_print(f"📝 Calling LLM...", verbose)
@@ -79,12 +92,27 @@ def quant_node(state: TradingState):
 
     print("✅ QUANT NODE COMPLETE")
 
-    return {"quant_strategy": response.content, "indicator_requested": response.content}
+    elapsed = time.time() - start_time
+    node_outputs = state.get("node_outputs", {})
+    node_outputs["quant"] = {
+        "llm_output": response.content,
+        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
+    }
+    node_timestamps = state.get("node_timestamps", {})
+    node_timestamps["quant"] = elapsed
+
+    return {
+        "quant_strategy": response.content,
+        "indicator_requested": response.content,
+        "node_outputs": node_outputs,
+        "node_timestamps": node_timestamps,
+    }
 
 
 def bull_node(state: TradingState):
     """Argues the long case based strictly on Quant/Coder math and Researcher data."""
     verbose = state.get("verbose", False)
+    start_time = time.time()
 
     print("\n" + "=" * 50)
     print("📋 BULL NODE STARTING")
@@ -117,12 +145,26 @@ def bull_node(state: TradingState):
     tech_data["bull_case"] = response.content
     print("✅ BULL NODE COMPLETE")
 
-    return {"technical_analysis": tech_data}
+    elapsed = time.time() - start_time
+    node_outputs = state.get("node_outputs", {})
+    node_outputs["bull"] = {
+        "llm_output": response.content,
+        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
+    }
+    node_timestamps = state.get("node_timestamps", {})
+    node_timestamps["bull"] = elapsed
+
+    return {
+        "technical_analysis": tech_data,
+        "node_outputs": node_outputs,
+        "node_timestamps": node_timestamps,
+    }
 
 
 def bear_node(state: TradingState):
     """Argues the short case based strictly on Quant/Coder math and Researcher data."""
     verbose = state.get("verbose", False)
+    start_time = time.time()
 
     print("\n" + "=" * 50)
     print("📋 BEAR NODE STARTING")
@@ -155,4 +197,17 @@ def bear_node(state: TradingState):
     tech_data["bear_case"] = response.content
     print("✅ BEAR NODE COMPLETE")
 
-    return {"technical_analysis": tech_data}
+    elapsed = time.time() - start_time
+    node_outputs = state.get("node_outputs", {})
+    node_outputs["bear"] = {
+        "llm_output": response.content,
+        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
+    }
+    node_timestamps = state.get("node_timestamps", {})
+    node_timestamps["bear"] = elapsed
+
+    return {
+        "technical_analysis": tech_data,
+        "node_outputs": node_outputs,
+        "node_timestamps": node_timestamps,
+    }
