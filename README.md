@@ -50,6 +50,35 @@ ThinkerSwarmHF/
 7. The Reviewer checks risk/reward and returns the final JSON decision.
 8. `main.py` writes JSON, DOCX, and Markdown reports.
 
+```mermaid
+flowchart LR
+    A[main.py / initial_state] --> B[Manager]
+    B --> C[Researcher]
+    C --> D[Quant Head]
+    C --> E[Fundamental Head]
+
+    D --> F[Quant Bull Worker]
+    D --> G[Quant Bear Worker]
+    E --> H[Fund Bull Worker]
+    E --> I[Fund Bear Worker]
+
+    F --> J[Quant Head Synthesis]
+    G --> J
+    H --> K[Fund Head Synthesis]
+    I --> K
+
+    J --> L[Manager Decision]
+    K --> L
+    L --> M[Reviewer]
+    M --> N[Final JSON + DOCX + MD]
+
+    C -. optional web search .-> O[Research Tools]
+    F -. indicator tools .-> P[Indicator Tools]
+    G -. indicator tools .-> P
+    H -. fundamental tools .-> Q[Fundamental Tools]
+    I -. fundamental tools .-> Q
+```
+
 ## Research and analysis inputs
 
 - `skills/` is the preferred source of agent instructions.
