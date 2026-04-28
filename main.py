@@ -123,23 +123,40 @@ def main():
     # 2. Initialize the Shared State
     execution_start = time.time()
     initial_state = {
+        # Base
         "ticker": args.ticker.upper(),
         "db_path": args.db,
         "verbose": args.verbose,
         "iteration_count": 0,
-        "coder_loop_count": 0,
         "market_context": "",
+        "manager_brief": "",
+        # Researcher
+        "researcher_context": "",
+        # Quantitative wing
+        "quant_bull_findings": "",
+        "quant_bear_findings": "",
+        "quant_wing_report": "",
+        # Fundamental wing
+        "fund_bull_findings": "",
+        "fund_bear_findings": "",
+        "fund_wing_report": "",
+        # Coder fallback
+        "coder_loop_count": 0,
         "indicator_requested": "",
         "draft_code": "",
         "test_results": "",
         "code_review_feedback": "",
         "code_approved": False,
+        "quant_used_tools": False,
         "quant_strategy": "",
         "coder_output": {},
+        # Legacy analysis dicts (for reviewer compat)
         "technical_analysis": {},
         "fundamental_analysis": {},
+        # Review
         "reviewer_feedback": "",
         "final_decision": {},
+        # Tracking
         "execution_start_time": execution_start,
         "node_timestamps": {},
         "node_outputs": {},

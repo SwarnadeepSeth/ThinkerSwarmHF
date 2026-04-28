@@ -1,115 +1,237 @@
-from core.state import TradingState
+"""
+Head nodes for each analytical wing.
+Each head briefs its workers and synthesises their findings into a structured report.
+"""
+
+import time
 from agents.llm_factory import get_llm
 from agents.utils import load_prompt
-import time
+from agents.print_utils import (
+    node_banner, dispatch_banner, section_divider,
+    synthesis_summary, findings_preview, node_complete,
+)
+from core.state import TradingState
 
 
-def debug_print(msg: str, verbose: bool):
-    if verbose:
-        print(msg)
+_REPORT_SCHEMA = """\
+Structure your report with these exact Markdown headers (include all of them):
+## Rationale
+## Bull Perspective
+## Bear Perspective
+## Risks
+## Opportunities
+## Priority
+(One of: High / Medium / Low)
+## Recommended Stop Loss
+(Specific price level with justification)
+## Profit Target
+(Specific price level with justification)
+## Time Horizon
+(e.g. 2–4 weeks, 1–3 months)
+## Overall Bias
+(BULLISH / BEARISH / NEUTRAL)"""
 
 
-def technical_head_node(state: TradingState):
-    """Synthesizes the Quant, Bull, and Bear into a final technical outlook."""
-    verbose = state.get("verbose", False)
-    start_time = time.time()
-
-    print("\n" + "=" * 50)
-    print("📋 TECHNICAL_HEAD NODE STARTING")
-    print(f"   Ticker: {state['ticker']}")
-    print(f"   Iteration: {state.get('iteration_count', 0)}")
-    print("=" * 50)
-    if verbose:
-        print(f"📋 Quant Strategy: {state.get('quant_strategy', 'None')[:200]}...")
-        print(
-            f"📋 Bull Case: {state.get('technical_analysis', {}).get('bull_case', 'None')[:200]}..."
-        )
-        print(
-            f"📋 Bear Case: {state.get('technical_analysis', {}).get('bear_case', 'None')[:200]}..."
-        )
-
-    llm = get_llm()
-    system_prompt = load_prompt("heads/technical_head")
-
-    tech_data = state.get("technical_analysis", {})
-    bull_case = tech_data.get("bull_case", "No bull case provided.")
-    bear_case = tech_data.get("bear_case", "No bear case provided.")
-    quant_strat = state.get("quant_strategy", "No quant strategy provided.")
-
-    instruction = (
-        f"{system_prompt}\n\n"
-        f"Quant Strategy: {quant_strat}\n"
-        f"Bull Argument: {bull_case}\n"
-        f"Bear Argument: {bear_case}\n\n"
-        "Synthesize this into a definitive Technical Report."
-    )
-
-    debug_print(f"📝 Calling LLM for technical synthesis...", verbose)
-    response = llm.invoke(instruction)
-    debug_print(f"📨 Technical synthesis: {response.content[:200]}...", verbose)
-
-    print("✅ TECHNICAL_HEAD NODE COMPLETE")
-
-    elapsed = time.time() - start_time
+def _bookkeep(state, node_name, content, base_llm, elapsed):
     node_outputs = state.get("node_outputs", {})
-    node_outputs["technical_head"] = {
-        "llm_output": response.content,
-        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
+    node_outputs[node_name] = {
+        "llm_output": content,
+        "model_used": getattr(base_llm, "model", "unknown"),
     }
     node_timestamps = state.get("node_timestamps", {})
-    node_timestamps["technical_head"] = elapsed
-
-    return {
-        "technical_analysis": {"head_synthesis": response.content},
-        "node_outputs": node_outputs,
-        "node_timestamps": node_timestamps,
-    }
+    node_timestamps[node_name] = elapsed
+    return node_outputs, node_timestamps
 
 
-def fundamental_head_node(state: TradingState):
-    """Synthesizes the fundamental data into a final intrinsic valuation outlook."""
-    verbose = state.get("verbose", False)
+# ── Quantitative Wing ─────────────────────────────────────────────────────────
+
+def quant_head_node(state: TradingState):
+    """Briefs quant bull & bear workers — sets the analytical framework."""
     start_time = time.time()
+    ticker    = state["ticker"]
+    iteration = state.get("iteration_count", 0)
 
-    print("\n" + "=" * 50)
-    print("📋 FUNDAMENTAL_HEAD NODE STARTING")
-    print(f"   Ticker: {state['ticker']}")
-    print(f"   Iteration: {state.get('iteration_count', 0)}")
-    print("=" * 50)
-    if verbose:
-        print(
-            f"📋 Researcher Context: {state.get('fundamental_analysis', {}).get('researcher_context', 'None')[:200]}..."
-        )
+    node_banner("Quant Head — Briefing Workers", ticker=ticker, iteration=iteration, emoji="📊")
 
-    llm = get_llm()
-    system_prompt = load_prompt("heads/fundamental_head")
-
-    fund_data = state.get("fundamental_analysis", {})
-    research = fund_data.get("researcher_context", "No research provided.")
+    llm_obj  = get_llm()
+    base_llm = llm_obj.llm if hasattr(llm_obj, "llm") else llm_obj
 
     instruction = (
-        f"{system_prompt}\n\n"
-        f"Raw Researcher Data: {research}\n\n"
-        "Synthesize this into a definitive Fundamental Report."
+        f"You are the Head of Quantitative Research overseeing analysis of {ticker}.\n"
+        f"Market Context: {state.get('market_context', 'N/A')}\n"
+        f"Manager Brief: {state.get('manager_brief', 'N/A')}\n\n"
+        "In 3-4 sentences, set the technical analytical framework for your Bull and Bear analysts: "
+        "which indicator families to prioritize (trend, momentum, volatility, volume), "
+        "the appropriate time horizon, and the key price levels to watch."
     )
 
-    debug_print(f"📝 Calling LLM for fundamental synthesis...", verbose)
-    response = llm.invoke(instruction)
-    debug_print(f"📨 Fundamental synthesis: {response.content[:200]}...", verbose)
+    response = llm_obj.invoke(instruction)
+    elapsed  = time.time() - start_time
 
-    print("✅ FUNDAMENTAL_HEAD NODE COMPLETE")
+    print(f"\n  Quant Head Brief:")
+    for line in response.content.strip().splitlines()[:4]:
+        print(f"    {line.strip()[:90]}")
 
-    elapsed = time.time() - start_time
-    node_outputs = state.get("node_outputs", {})
-    node_outputs["fundamental_head"] = {
-        "llm_output": response.content,
-        "model_used": llm.llm.model if hasattr(llm, "llm") else "unknown",
-    }
-    node_timestamps = state.get("node_timestamps", {})
-    node_timestamps["fundamental_head"] = elapsed
+    dispatch_banner(
+        "Dispatching Quant Workers",
+        [
+            ("📈 quant_bull_worker", "→ technical indicator tools (≤3 tool rounds)"),
+            ("📉 quant_bear_worker", "→ technical indicator tools (≤3 tool rounds)"),
+        ],
+    )
 
+    node_outputs, node_timestamps = _bookkeep(state, "quant_head", response.content, base_llm, elapsed)
+    node_complete("Quant Head", elapsed)
     return {
-        "fundamental_analysis": {"head_synthesis": response.content},
-        "node_outputs": node_outputs,
-        "node_timestamps": node_timestamps,
+        "quant_wing_report": "",
+        "node_outputs":      node_outputs,
+        "node_timestamps":   node_timestamps,
+    }
+
+
+def quant_head_synthesis_node(state: TradingState):
+    """Synthesises quant bull+bear into the authoritative Technical Wing Report."""
+    start_time = time.time()
+    ticker    = state["ticker"]
+    iteration = state.get("iteration_count", 0)
+
+    node_banner("Quant Head — Synthesis", ticker=ticker, iteration=iteration, emoji="📊")
+
+    llm_obj  = get_llm()
+    base_llm = llm_obj.llm if hasattr(llm_obj, "llm") else llm_obj
+
+    bull_case = state.get("quant_bull_findings", "No bull findings.")
+    bear_case = state.get("quant_bear_findings", "No bear findings.")
+
+    section_divider("Worker Findings Received")
+    findings_preview(bull_case, "Bull Analyst", max_chars=250)
+    findings_preview(bear_case, "Bear Analyst", max_chars=250)
+
+    instruction = (
+        f"You are the Head of Quantitative Research. Synthesise your analysts' findings on {ticker}.\n\n"
+        f"BULL ANALYST FINDINGS:\n{bull_case}\n\n"
+        f"BEAR ANALYST FINDINGS:\n{bear_case}\n\n"
+        f"Market Context: {state.get('market_context','')[:300]}\n\n"
+        "Produce the definitive Technical / Quantitative Wing Report. Be objective. "
+        "Derive specific price levels for Stop Loss (e.g. ATR-based, below key support) "
+        "and Profit Target (e.g. resistance, Bollinger upper band). "
+        "State a clear time horizon and conviction level.\n\n"
+        f"{_REPORT_SCHEMA}"
+    )
+
+    response = llm_obj.invoke(instruction)
+    elapsed  = time.time() - start_time
+
+    synthesis_summary(response.content, "Technical Wing Report")
+
+    tech_analysis = state.get("technical_analysis", {})
+    tech_analysis["head_synthesis"] = response.content
+
+    node_outputs, node_timestamps = _bookkeep(
+        state, "quant_head_synthesis", response.content, base_llm, elapsed
+    )
+    node_complete("Quant Head Synthesis", elapsed, "→ manager_decision")
+    return {
+        "quant_wing_report":  response.content,
+        "technical_analysis": tech_analysis,
+        "node_outputs":       node_outputs,
+        "node_timestamps":    node_timestamps,
+    }
+
+
+# ── Fundamental Wing ──────────────────────────────────────────────────────────
+
+def fund_head_node(state: TradingState):
+    """Briefs fundamental bull & bear workers — sets the valuation framework."""
+    start_time = time.time()
+    ticker    = state["ticker"]
+    iteration = state.get("iteration_count", 0)
+
+    node_banner("Fundamental Head — Briefing Workers", ticker=ticker, iteration=iteration, emoji="💼")
+
+    llm_obj  = get_llm()
+    base_llm = llm_obj.llm if hasattr(llm_obj, "llm") else llm_obj
+
+    instruction = (
+        f"You are the Head of Fundamental Research overseeing analysis of {ticker}.\n"
+        f"Market Context: {state.get('market_context', 'N/A')}\n"
+        f"Manager Brief: {state.get('manager_brief', 'N/A')}\n"
+        f"Researcher Context: {state.get('researcher_context', 'N/A')[:400]}\n\n"
+        "In 3-4 sentences, set the valuation analytical framework for your Bull and Bear analysts: "
+        "which methods to prioritize (DCF, multiples, FCF yield, comps), "
+        "what assumptions to stress-test, and what fundamental catalysts or risks matter most."
+    )
+
+    response = llm_obj.invoke(instruction)
+    elapsed  = time.time() - start_time
+
+    print(f"\n  Fundamental Head Brief:")
+    for line in response.content.strip().splitlines()[:4]:
+        print(f"    {line.strip()[:90]}")
+
+    dispatch_banner(
+        "Dispatching Fundamental Workers",
+        [
+            ("💚 fund_bull_worker", "→ valuation tools: DCF, PE, EV/EBITDA, FCF, comps (≤3 rounds)"),
+            ("🔴 fund_bear_worker", "→ valuation tools: scenario analysis, risk metrics   (≤3 rounds)"),
+        ],
+    )
+
+    node_outputs, node_timestamps = _bookkeep(state, "fund_head", response.content, base_llm, elapsed)
+    node_complete("Fundamental Head", elapsed)
+    return {
+        "fund_wing_report": "",
+        "node_outputs":     node_outputs,
+        "node_timestamps":  node_timestamps,
+    }
+
+
+def fund_head_synthesis_node(state: TradingState):
+    """Synthesises fund bull+bear into the authoritative Fundamental Wing Report."""
+    start_time = time.time()
+    ticker    = state["ticker"]
+    iteration = state.get("iteration_count", 0)
+
+    node_banner("Fundamental Head — Synthesis", ticker=ticker, iteration=iteration, emoji="💼")
+
+    llm_obj  = get_llm()
+    base_llm = llm_obj.llm if hasattr(llm_obj, "llm") else llm_obj
+
+    bull_case    = state.get("fund_bull_findings", "No bull findings.")
+    bear_case    = state.get("fund_bear_findings", "No bear findings.")
+    research_ctx = state.get("researcher_context", "")
+
+    section_divider("Worker Findings Received")
+    findings_preview(bull_case, "Bull Analyst", max_chars=250)
+    findings_preview(bear_case, "Bear Analyst", max_chars=250)
+
+    instruction = (
+        f"You are the Head of Fundamental Research. Synthesise your analysts' findings on {ticker}.\n\n"
+        f"BULL ANALYST FINDINGS:\n{bull_case}\n\n"
+        f"BEAR ANALYST FINDINGS:\n{bear_case}\n\n"
+        f"Researcher Context: {research_ctx[:400]}\n\n"
+        "Produce the definitive Fundamental Wing Report. Be objective. "
+        "Anchor Stop Loss and Profit Target to specific valuation levels "
+        "(e.g. DCF intrinsic value, peer comps median, a specific price where PE would be stretched). "
+        "Provide a fair-value range.\n\n"
+        f"{_REPORT_SCHEMA}"
+    )
+
+    response = llm_obj.invoke(instruction)
+    elapsed  = time.time() - start_time
+
+    synthesis_summary(response.content, "Fundamental Wing Report")
+
+    fund_analysis = state.get("fundamental_analysis", {})
+    fund_analysis["head_synthesis"] = response.content
+
+    node_outputs, node_timestamps = _bookkeep(
+        state, "fund_head_synthesis", response.content, base_llm, elapsed
+    )
+    node_complete("Fundamental Head Synthesis", elapsed, "→ manager_decision")
+    return {
+        "fund_wing_report":    response.content,
+        "fundamental_analysis": fund_analysis,
+        "node_outputs":        node_outputs,
+        "node_timestamps":     node_timestamps,
     }
