@@ -3,8 +3,9 @@ from agents.llm_factory import get_llm
 from agents.utils import load_prompt
 from agents.print_utils import node_banner, section_divider, node_complete, dispatch_banner
 from tools.file_tools import tool_grep, tool_cat
+from tools.research_tools import get_sector_peer_snapshot, free_web_search_context
 import tools.indicator_tools as _itmod
-from tools.indicator_tools import get_all_indicator_tools
+from tools.indicator_tools import get_all_indicator_tools, get_indicator_tool_playbook
 from langchain_core.messages import HumanMessage, ToolMessage
 import time
 import json
@@ -15,6 +16,7 @@ def researcher_node(state: TradingState):
     start_time = time.time()
     ticker    = state["ticker"]
     iteration = state.get("iteration_count", 0)
+    allow_research_web = bool(state.get("allow_research_web", False))
 
     node_banner("Researcher", ticker=ticker, iteration=iteration, emoji="📰")
     print(f"  Loading library data for {ticker}…")
@@ -28,12 +30,38 @@ def researcher_node(state: TradingState):
         lib_data = f"Library data unavailable: {e}"
         print(f"  ⚠ Library unavailable: {e}")
 
+    print("  Building sector and peer comparative context…")
+    try:
+        sector_peer_context = get_sector_peer_snapshot.invoke({"ticker": ticker, "max_peers": 6})
+    except Exception as e:
+        sector_peer_context = f"Sector/peer context unavailable: {e}"
+
+    web_context_blocks = []
+    if allow_research_web:
+        print("  Internet search enabled — fetching external context…")
+        queries = [
+            f"{ticker} sector industry peers comparative analysis",
+            f"{ticker} latest earnings guidance demand outlook",
+            f"{ticker} sector headwinds tailwinds macro rates",
+        ]
+        for query in queries:
+            try:
+                block = free_web_search_context.invoke({"query": query, "max_results": 4})
+            except Exception as e:
+                block = f"Web search error for '{query}': {e}"
+            web_context_blocks.append(block)
+    else:
+        web_context_blocks.append("Internet search disabled (allow_research_web=False).")
+    web_context = "\n\n".join(web_context_blocks)
+
     llm = get_llm()
     system_prompt = load_prompt("specialists/researcher")
     instruction = (
         f"{system_prompt}\n\n"
         f"Ticker: {ticker}\n"
         f"Library Data: {lib_data}\n"
+        f"Sector & Peer Comparative Context:\n{sector_peer_context}\n\n"
+        f"Internet Search Context:\n{web_context}\n\n"
         "Summarize relevant findings for trading analysis."
     )
 
@@ -62,7 +90,11 @@ def researcher_node(state: TradingState):
 
     return {
         "researcher_context":   response.content,
-        "fundamental_analysis": {"researcher_context": response.content},
+        "fundamental_analysis": {
+            "researcher_context": response.content,
+            "sector_peer_context": sector_peer_context,
+            "internet_context": web_context,
+        },
         "node_outputs":         node_outputs,
         "node_timestamps":      node_timestamps,
     }
@@ -91,6 +123,11 @@ def quant_node(state: TradingState):
 
     indicator_tools = get_all_indicator_tools()
     tool_map = {t.name: t for t in indicator_tools}
+    required_structure_tools = {
+        "calculate_wt_oscillator",
+        "calculate_heikin_ashi_rsi",
+        "calculate_renko",
+    }
 
     # Bind tools to the base LLM (bypass RetryLLM wrapper)
     llm_obj = get_llm()
@@ -100,9 +137,27 @@ def quant_node(state: TradingState):
     system_prompt = load_prompt("specialists/quant")
     instruction = (
         f"{system_prompt}\n\n"
-        f"Ticker: {ticker}. Use the available indicator tools to calculate AT LEAST 5 "
-        "different technical indicators. Call each tool with the ticker and appropriate "
-        "parameters. Do not explain — just call the tools."
+        f"{get_indicator_tool_playbook()}\n\n"
+        f"Ticker: {ticker}. Use the available indicator tools to calculate AT LEAST 6 "
+        "different technical indicators.\n\n"
+        "Your tool plan must be multi-factor and regime-first:\n"
+        "- one regime filter\n"
+        "- one trend anchor\n"
+        "- one momentum/timing tool\n"
+        "- one volatility or risk-sizing tool\n"
+        "- one noise-reduced or synthetic-structure tool\n"
+        "- one participation / volume-sensitive tool when relevant\n\n"
+        "Mandatory: include at least one advanced modeling tool from this set:\n"
+        "- calculate_garch_volatility\n"
+        "- calculate_volatility_regime_clustering\n"
+        "- calculate_price_level_clustering\n\n"
+        "Mandatory: include at least one noise-reduced structure tool from this set:\n"
+        "- calculate_wt_oscillator\n"
+        "- calculate_heikin_ashi_rsi\n"
+        "- calculate_renko\n\n"
+        "Do not explain — just call the tools.\n"
+        "Do not default to RSI or MACD as your first move. Start by identifying regime with ADX, "
+        "Ichimoku, SuperTrend, EMA/SMA, or VWAP as appropriate."
     )
 
     debug_print("📝 Calling LLM with tools...", verbose)
@@ -110,7 +165,7 @@ def quant_node(state: TradingState):
     # Multi-turn tool loop: keep calling until we have 5+ indicators or LLM stops
     messages = [HumanMessage(content=instruction)]
     tool_results = {}
-    TARGET = 5
+    TARGET = 6
     MAX_ROUNDS = 4
 
     for round_num in range(MAX_ROUNDS):
@@ -141,6 +196,17 @@ def quant_node(state: TradingState):
 
         if len(tool_results) >= TARGET:
             break  # enough indicators collected
+
+        if not required_structure_tools.intersection(tool_results.keys()):
+            messages.append(HumanMessage(
+                content=(
+                    "You have not yet used a noise-reduced structure tool. "
+                    "You must call exactly one now: calculate_wt_oscillator, "
+                    "calculate_heikin_ashi_rsi, or calculate_renko. "
+                    "Do not substitute RSI, MACD, or Bollinger Bands."
+                )
+            ))
+            continue
 
         # Ask LLM to call more tools
         still_needed = TARGET - len(tool_results)

@@ -16,6 +16,7 @@ from agents.print_utils       import (
     section_divider, findings_preview, node_complete,
 )
 from core.state import TradingState
+from tools.indicator_tools    import get_indicator_tool_playbook
 
 
 # ── Tool loop ─────────────────────────────────────────────────────────────────
@@ -63,6 +64,43 @@ def _tool_loop(llm_with_tools, tool_map, messages, ticker,
     return results, last_response
 
 
+def _choose_structure_tool(tool_results: dict) -> str:
+    text = " ".join(str(v).upper() for v in tool_results.values())
+    if "WEAK_TREND" in text or "INSIDE_BANDS" in text or "NEUTRAL" in text:
+        return "calculate_wt_oscillator"
+    if "BREAKOUT" in text or "BULLISH" in text or "BEARISH" in text:
+        return "calculate_renko"
+    return "calculate_heikin_ashi_rsi"
+
+
+def _ensure_structure_tool(tool_results, tool_map, ticker, messages, preferred=None):
+    structure_tools = [
+        "calculate_wt_oscillator",
+        "calculate_heikin_ashi_rsi",
+        "calculate_renko",
+    ]
+    if preferred and preferred in structure_tools:
+        structure_tools.remove(preferred)
+        structure_tools.insert(0, preferred)
+    if any(name in tool_results for name in structure_tools):
+        return tool_results
+    selected = _choose_structure_tool(tool_results)
+    if selected not in tool_map:
+        return tool_results
+    try:
+        result = tool_map[selected].invoke({"ticker": ticker})
+    except Exception as e:
+        result = f"Error: {e}"
+    tool_results[selected] = str(result)
+    messages.append(HumanMessage(
+        content=(
+            f"Forced structure tool fallback: {selected} was not used in the LLM loop, "
+            "so it was called directly to ensure a noise-reduced regime view."
+        )
+    ))
+    return tool_results
+
+
 def _base_context(state: TradingState) -> str:
     return (
         f"Ticker: {state['ticker']}\n"
@@ -106,11 +144,13 @@ def quant_bull_worker_node(state: TradingState):
     instruction = (
         f"You are the Quantitative Bull Analyst for {ticker}. "
         "Call technical indicator tools to gather evidence for a LONG/BULL position. "
-        "Call at least 5 different indicators. Focus on: momentum, oversold signals, "
-        "bullish crossovers, strong trend, price above key MAs.\n\n" + context
+        "Call at least 5 different indicators. Focus on: regime, trend persistence, volatility clustering, "
+        "acceptance above value, breakout quality, and invalidation structure.\n\n"
+        f"{get_indicator_tool_playbook()}\n\n" + context
     )
     messages = [HumanMessage(content=instruction)]
     tool_results, _ = _tool_loop(llm_wt, tool_map, messages, ticker)
+    tool_results = _ensure_structure_tool(tool_results, tool_map, ticker, messages, preferred="calculate_wt_oscillator")
 
     section_divider("Synthesising Bull Case")
     tool_summary    = "\n".join(f"  {k}: {v}" for k, v in tool_results.items())
@@ -119,9 +159,11 @@ def quant_bull_worker_node(state: TradingState):
         f"{tool_summary}\n\n{context}\n"
         "Write a rigorous BULL case. Include:\n"
         "- Which indicators are bullish and why (with numbers)\n"
-        "- Key support levels and momentum signals\n"
+        "- Regime assessment: trending, ranging, compressing, or breaking out\n"
+        "- Key support levels, acceptance levels, and momentum signals\n"
         "- Upside catalysts and entry triggers\n"
-        "- Risks that could invalidate the bull thesis"
+        "- Risks that could invalidate the bull thesis\n"
+        "- One compact markdown table with columns Signal | Reading | Interpretation"
     )
     findings = llm_obj.invoke(synthesis_prompt).content
     findings_preview(findings, "Bull Findings")
@@ -163,11 +205,13 @@ def quant_bear_worker_node(state: TradingState):
         f"You are the Quantitative Bear Analyst for {ticker}. "
         "Call technical indicator tools to find evidence for a SHORT/BEAR position. "
         f"The Bull analyst argued: {bull_ctx[:200]}. Counter with data.\n"
-        "Call at least 5 different indicators. Focus on: overbought signals, "
-        "bearish divergences, price below key MAs, weak momentum.\n\n" + context
+        "Call at least 5 different indicators. Focus on: regime failure, trend exhaustion, "
+        "volatility expansion, rejection at value, and breakdown structure.\n\n"
+        f"{get_indicator_tool_playbook()}\n\n" + context
     )
     messages = [HumanMessage(content=instruction)]
     tool_results, _ = _tool_loop(llm_wt, tool_map, messages, ticker)
+    tool_results = _ensure_structure_tool(tool_results, tool_map, ticker, messages, preferred="calculate_renko")
 
     section_divider("Synthesising Bear Case")
     tool_summary    = "\n".join(f"  {k}: {v}" for k, v in tool_results.items())
@@ -176,9 +220,11 @@ def quant_bear_worker_node(state: TradingState):
         f"{tool_summary}\n\nBull thesis to counter: {bull_ctx}\n\n{context}\n"
         "Write a rigorous BEAR case. Include:\n"
         "- Which indicators are bearish and why (with numbers)\n"
-        "- Key resistance levels and bearish divergences\n"
+        "- Regime assessment: trending, ranging, compressing, or breaking down\n"
+        "- Key resistance levels, rejection zones, and bearish divergences\n"
         "- Downside catalysts and breakdown triggers\n"
-        "- Risks that could invalidate the bear thesis"
+        "- Risks that could invalidate the bear thesis\n"
+        "- One compact markdown table with columns Signal | Reading | Interpretation"
     )
     findings = llm_obj.invoke(synthesis_prompt).content
     findings_preview(findings, "Bear Findings")
@@ -231,7 +277,8 @@ def fund_bull_worker_node(state: TradingState):
         "- Valuation: is the stock cheap vs. intrinsic value and peers? (use numbers)\n"
         "- Business quality: FCF, margins, balance sheet\n"
         "- Growth catalysts and competitive advantages\n"
-        "- Risks to the bull thesis"
+        "- Risks to the bull thesis\n"
+        "- One compact markdown table with columns Metric | Reading | Interpretation"
     )
     findings = llm_obj.invoke(synthesis_prompt).content
     findings_preview(findings, "Fundamental Bull Findings")
@@ -286,7 +333,8 @@ def fund_bear_worker_node(state: TradingState):
         "- Valuation: is the stock expensive? (use specific multiples and numbers)\n"
         "- Business risks: growth slowdown, margin compression, balance sheet\n"
         "- Competitive threats and scenario downside\n"
-        "- Key downside price targets with justification"
+        "- Key downside price targets with justification\n"
+        "- One compact markdown table with columns Metric | Reading | Interpretation"
     )
     findings = llm_obj.invoke(synthesis_prompt).content
     findings_preview(findings, "Fundamental Bear Findings")

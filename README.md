@@ -12,7 +12,8 @@ The framework operates as a directed cyclic graph (LangGraph). The Manager route
 ai_trading_framework/
 ├── data/
 │   └── market_data.sqlite          # 5-year 1D SQLite database
-├── prompts/                        # Decoupled system instructions
+├── skills/                         # Runtime agent skills (preferred source)
+├── prompts/                        # Legacy fallback system instructions
 │   ├── manager.txt, reviewer.txt
 │   ├── heads/                      # technical_head.txt, fundamental_head.txt
 │   └── specialists/                # bull, bear, researcher, quant, coder, code_reviewer
@@ -84,6 +85,9 @@ You can execute the framework by running main.py and passing a ticker.
 
 Bash
 python main.py --ticker TSLA
+
+# Optional: enable free internet context for the Researcher node
+python main.py --ticker TSLA --research-web
 Note: The first run may take longer if the Coder needs to write and test foundational indicators. Subsequent runs will be faster as the /indicators directory populates.
 
 

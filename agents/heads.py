@@ -16,6 +16,7 @@ from core.state import TradingState
 _REPORT_SCHEMA = """\
 Structure your report with these exact Markdown headers (include all of them):
 ## Rationale
+Include a compact markdown table named Evidence Snapshot with columns Signal | Reading | Interpretation.
 ## Bull Perspective
 ## Bear Perspective
 ## Risks
@@ -62,7 +63,8 @@ def quant_head_node(state: TradingState):
         f"Manager Brief: {state.get('manager_brief', 'N/A')}\n\n"
         "In 3-4 sentences, set the technical analytical framework for your Bull and Bear analysts: "
         "which indicator families to prioritize (trend, momentum, volatility, volume), "
-        "the appropriate time horizon, and the key price levels to watch."
+        "the appropriate time horizon, the most important support/resistance levels, "
+        "and the exact invalidation threshold that would break the thesis."
     )
 
     response = llm_obj.invoke(instruction)
@@ -115,7 +117,7 @@ def quant_head_synthesis_node(state: TradingState):
         "Produce the definitive Technical / Quantitative Wing Report. Be objective. "
         "Derive specific price levels for Stop Loss (e.g. ATR-based, below key support) "
         "and Profit Target (e.g. resistance, Bollinger upper band). "
-        "State a clear time horizon and conviction level.\n\n"
+        "State a clear time horizon, conviction level, and the exact condition that would invalidate the setup.\n\n"
         f"{_REPORT_SCHEMA}"
     )
 
@@ -159,7 +161,8 @@ def fund_head_node(state: TradingState):
         f"Researcher Context: {state.get('researcher_context', 'N/A')[:400]}\n\n"
         "In 3-4 sentences, set the valuation analytical framework for your Bull and Bear analysts: "
         "which methods to prioritize (DCF, multiples, FCF yield, comps), "
-        "what assumptions to stress-test, and what fundamental catalysts or risks matter most."
+        "what assumptions to stress-test, what fair-value anchor matters most, "
+        "and which business-quality variables could invalidate the thesis."
     )
 
     response = llm_obj.invoke(instruction)
@@ -213,7 +216,7 @@ def fund_head_synthesis_node(state: TradingState):
         "Produce the definitive Fundamental Wing Report. Be objective. "
         "Anchor Stop Loss and Profit Target to specific valuation levels "
         "(e.g. DCF intrinsic value, peer comps median, a specific price where PE would be stretched). "
-        "Provide a fair-value range.\n\n"
+        "Provide a fair-value range, a clear invalidation point, and the most important assumption to watch.\n\n"
         f"{_REPORT_SCHEMA}"
     )
 

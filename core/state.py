@@ -12,6 +12,7 @@ class TradingState(TypedDict):
     ticker: str
     db_path: str
     verbose: bool
+    allow_research_web: bool
     market_context: str
     manager_brief: str
 
