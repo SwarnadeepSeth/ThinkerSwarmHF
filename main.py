@@ -72,6 +72,24 @@ def _collect_tool_summary_rows(node_outputs: dict) -> list[list[str]]:
     return rows
 
 
+def _split_lines(text: str) -> list[str]:
+    return [line.rstrip() for line in str(text or "").splitlines()]
+
+
+def _add_verbatim_section(doc, title: str, text: str):
+    doc.add_heading(title, level=1)
+    content = str(text or "").strip()
+    if not content:
+        doc.add_paragraph("No data available.")
+        return
+    for line in _split_lines(content):
+        paragraph = doc.add_paragraph()
+        paragraph.paragraph_format.space_after = Pt(0)
+        run = paragraph.add_run(line)
+        run.font.size = Pt(8)
+        run.font.name = "Courier New"
+
+
 def _md_escape(value) -> str:
     text = _clean_text(value)
     return text.replace("|", "\\|").replace("\n", " ")
@@ -252,6 +270,14 @@ def generate_docx_report(ticker: str, out_data: dict, decision: dict):
             widths=[2.2, 4.4],
         )
 
+    fundamental_analysis = out_data.get("fundamental_analysis", {}) or {}
+    sector_peer_context = fundamental_analysis.get("sector_peer_context", "")
+    internet_context = fundamental_analysis.get("internet_context", "")
+    if sector_peer_context:
+        _add_verbatim_section(doc, "Sector & Peer Comparative Context", sector_peer_context)
+    if internet_context:
+        _add_verbatim_section(doc, "Internet Search Context", internet_context)
+
     node_outputs = out_data.get("node_outputs", {}) or {}
     tool_sections = [
         ("Quantitative Bull Tool Stack", node_outputs.get("quant_bull_worker", {}).get("tool_results", {})),
@@ -408,6 +434,18 @@ def generate_markdown_report(ticker: str, out_data: dict, decision: dict):
         if fund_rows:
             fund_rows = [[sec, _truncate_for_md(text, 300)] for sec, text in fund_rows]
             lines.extend(["## Fundamental Wing Highlights", _md_table(["Section", "Excerpt"], fund_rows), ""])
+
+    fundamental_analysis = out_data.get("fundamental_analysis", {}) or {}
+    sector_peer_context = fundamental_analysis.get("sector_peer_context", "")
+    internet_context = fundamental_analysis.get("internet_context", "")
+    if sector_peer_context:
+        lines.extend(["## Sector & Peer Comparative Context", "```"])
+        lines.append(sector_peer_context)
+        lines.extend(["```", ""])
+    if internet_context:
+        lines.extend(["## Internet Search Context", "```"])
+        lines.append(internet_context)
+        lines.extend(["```", ""])
 
     node_outputs = out_data.get("node_outputs", {}) or {}
     tool_sections = [
@@ -604,6 +642,7 @@ def main():
         "nodes_executed": list(node_outputs.keys()),
         "steps": steps,
         "node_outputs": node_outputs,
+        "fundamental_analysis": final_state.get("fundamental_analysis", {}) if final_state else {},
         "final_decision": decision,
         "error": error_msg if error_msg else None,
     }
