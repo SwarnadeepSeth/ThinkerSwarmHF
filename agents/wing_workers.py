@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 
 import tools.indicator_tools  as _itmod
 from tools.indicator_tools    import get_all_indicator_tools
+import tools.fundamental_tools as _fundmod
 from tools.fundamental_tools  import get_all_fundamental_tools
 from agents.llm_factory       import get_llm
 from agents.print_utils       import (
@@ -251,6 +252,7 @@ def fund_bull_worker_node(state: TradingState):
     node_banner("Fundamental Bull Worker", ticker=ticker, emoji="💚")
     print("  Gathering bullish valuation evidence via fundamental tools…")
 
+    _fundmod.set_financial_db_path(state.get("financial_db_path", "data/financials.db"))
     tools    = get_all_fundamental_tools()
     tool_map = {t.name: t for t in tools}
 
@@ -305,6 +307,7 @@ def fund_bear_worker_node(state: TradingState):
     node_banner("Fundamental Bear Worker", ticker=ticker, emoji="🔴")
     print("  Gathering bearish valuation evidence via fundamental tools…")
 
+    _fundmod.set_financial_db_path(state.get("financial_db_path", "data/financials.db"))
     tools    = get_all_fundamental_tools()
     tool_map = {t.name: t for t in tools}
 

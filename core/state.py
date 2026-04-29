@@ -11,6 +11,7 @@ class TradingState(TypedDict):
     # ── Base Request Context ───────────────────────────────────────────────────
     ticker: str
     db_path: str
+    financial_db_path: str
     verbose: bool
     allow_research_web: bool
     market_context: str

@@ -8,6 +8,7 @@ ThinkerSwarmHF is a multi-agent trading analysis framework built around LangGrap
 - Runs technical and fundamental analysis in parallel
 - Uses live indicator and valuation tools
 - Optionally adds public web context for research
+- Reads local fundamental data from `data/financials.db`
 - Writes terminal output, `out.json`, `TICKER_analysis_report.docx`, and `TICKER_analysis_report.md`
 
 ## Codebase structure
@@ -35,7 +36,7 @@ ThinkerSwarmHF/
 ├── prompts/                    # Legacy fallback instructions mirrored from skills/
 ├── indicators/                 # Generated / maintained indicator code
 ├── library/                    # Local research corpus and cached source material
-├── data/                       # SQLite market database
+├── data/                       # SQLite market and fundamental databases
 └── README.md
 ```
 
@@ -45,7 +46,7 @@ ThinkerSwarmHF/
 2. The Manager sets the market context and dispatches both wings.
 3. The Researcher reads `library/`, builds peer context, and optionally adds web context.
 4. The Quant wing evaluates regime, momentum, volatility, and structure tools.
-5. The Fundamental wing builds valuation, cash flow, balance sheet, and peer-comparison cases.
+5. The Fundamental wing builds valuation, cash flow, balance sheet, and peer-comparison cases using `data/financials.db` first.
 6. The Manager reconciles both wings into a trade setup.
 7. The Reviewer checks risk/reward and returns the final JSON decision.
 8. `main.py` writes JSON, DOCX, and Markdown reports.
@@ -84,6 +85,7 @@ flowchart LR
 - `skills/` is the preferred source of agent instructions.
 - `prompts/` remains as a fallback mirror for compatibility.
 - The Researcher always performs local sector/peer comparison.
+- The Researcher and Fundamental wing prefer the local `financials.db` snapshot for valuation context.
 - Web context is optional and enabled with `--research-web`.
 
 ## Reports
@@ -116,6 +118,7 @@ Example:
 ```bash
 python main.py --ticker MSFT
 python main.py --ticker MSFT --research-web
+python main.py --ticker MSFT --financial-db data/financials.db
 python main.py --ticker MSFT --db data/US_DB.db --verbose
 ```
 

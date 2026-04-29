@@ -20,13 +20,15 @@ def _load(ticker: str, limit: int = 300) -> pd.DataFrame:
     conn = sqlite3.connect(_DB_PATH)
     df = pd.read_sql_query(
         "SELECT date, open, high, low, close, volume FROM ohlcv "
-        "WHERE symbol = ? ORDER BY date ASC LIMIT ?",
+        "WHERE symbol = ? ORDER BY date DESC LIMIT ?",
         conn,
         params=(ticker, limit),
     )
     conn.close()
     if df.empty:
         raise ValueError(f"No OHLCV data for {ticker!r}")
+    # Keep the newest rows, but restore chronological order for indicator math.
+    df = df.iloc[::-1].reset_index(drop=True)
     df.columns = ["Date", "Open", "High", "Low", "Close", "Volume"]
     df["Date"] = pd.to_datetime(df["Date"])
     for col in ["Open", "High", "Low", "Close", "Volume"]:

@@ -4,6 +4,7 @@ from agents.utils import load_prompt
 from agents.print_utils import node_banner, section_divider, node_complete, dispatch_banner
 from tools.file_tools import tool_grep, tool_cat
 from tools.research_tools import get_sector_peer_snapshot, free_web_search_context
+from tools.financial_db import format_financial_snapshot
 import tools.indicator_tools as _itmod
 from tools.indicator_tools import get_all_indicator_tools, get_indicator_tool_playbook
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -36,6 +37,11 @@ def researcher_node(state: TradingState):
     except Exception as e:
         sector_peer_context = f"Sector/peer context unavailable: {e}"
 
+    try:
+        financial_snapshot = format_financial_snapshot(ticker, path=state.get("financial_db_path"))
+    except Exception as e:
+        financial_snapshot = f"Financial snapshot unavailable: {e}"
+
     web_context_blocks = []
     if allow_research_web:
         print("  Internet search enabled — fetching external context…")
@@ -61,6 +67,7 @@ def researcher_node(state: TradingState):
         f"Ticker: {ticker}\n"
         f"Library Data: {lib_data}\n"
         f"Sector & Peer Comparative Context:\n{sector_peer_context}\n\n"
+        f"Financial Database Context:\n{financial_snapshot}\n\n"
         f"Internet Search Context:\n{web_context}\n\n"
         "Summarize relevant findings for trading analysis."
     )
@@ -93,6 +100,7 @@ def researcher_node(state: TradingState):
         "fundamental_analysis": {
             "researcher_context": response.content,
             "sector_peer_context": sector_peer_context,
+            "financial_snapshot": financial_snapshot,
             "internet_context": web_context,
         },
         "node_outputs":         node_outputs,

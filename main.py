@@ -10,6 +10,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from agents.print_utils import render_kv_table
+from tools.financial_db import set_financial_db_path, resolve_financial_db_path
 
 # Load environment variables (NVIDIA_API_KEY)
 load_dotenv()
@@ -508,6 +509,12 @@ def main():
         "--db", type=str, default="data/US_DB.db", help="Path to your SQLite database"
     )
     parser.add_argument(
+        "--financial-db",
+        type=str,
+        default="",
+        help="Path to the fundamental SQLite database (default: data/financials.db)",
+    )
+    parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose debug output"
     )
     parser.add_argument(
@@ -524,8 +531,15 @@ def main():
         print("Please ensure your 'US_DB.db' is placed inside the 'data/' folder.")
         return
 
+    financial_db_path = resolve_financial_db_path(args.financial_db or None)
+    if not financial_db_path:
+        print("⚠️ Warning: financial database not found. Fundamental tools will fall back to yfinance.")
+        financial_db_path = args.financial_db or "data/financials.db"
+    set_financial_db_path(financial_db_path)
+
     print_header(f"🚀 Initializing Framework for {args.ticker.upper()}", args.verbose)
     print(f"🔌 Connected to database: {args.db}")
+    print(f"💼 Financial database: {financial_db_path}")
     print(f"🌐 Research web search: {'ENABLED' if args.research_web else 'DISABLED'}")
     if args.verbose:
         print(f"📋 Verbose mode: ENABLED")
@@ -539,6 +553,7 @@ def main():
         # Base
         "ticker": args.ticker.upper(),
         "db_path": args.db,
+        "financial_db_path": financial_db_path,
         "verbose": args.verbose,
         "allow_research_web": args.research_web,
         "iteration_count": 0,

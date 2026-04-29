@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from langchain_core.tools import tool
+from tools.financial_db import get_financial_record, get_peer_records, format_financial_snapshot
 
 
 def _fmt(v, decimals=2):
@@ -117,18 +118,29 @@ def get_sector_peer_snapshot(ticker: str, max_peers: int = 6) -> str:
                 if sec and sector != "N/A" and sec != sector and sym != base_ticker:
                     continue
 
+                db_row = get_financial_record(sym)
+                db_price = None
+                if db_row:
+                    try:
+                        shares = float(db_row.get("shares_outstanding") or 0.0)
+                        mkt = float(db_row.get("market_cap") or 0.0)
+                        db_price = mkt / shares if shares else None
+                    except Exception:
+                        db_price = None
+
                 rows.append(
                     {
                         "symbol": sym,
                         "name": str(info.get("shortName") or info.get("longName") or sym)[:28],
                         "sector": sec or "N/A",
                         "industry": info.get("industry") or "N/A",
-                        "market_cap_raw": float(info.get("marketCap") or 0.0),
-                        "market_cap": f"${_fmt((info.get('marketCap') or 0) / 1e9)}B",
-                        "trailing_pe": _fmt(info.get("trailingPE")),
-                        "forward_pe": _fmt(info.get("forwardPE")),
-                        "rev_growth": _pct(info.get("revenueGrowth")),
-                        "gross_margin": _pct(info.get("grossMargins")),
+                        "market_cap_raw": float((db_row.get("market_cap") if db_row else info.get("marketCap")) or 0.0),
+                        "market_cap": f"${_fmt(((db_row.get('market_cap') if db_row else info.get('marketCap')) or 0) / 1e9)}B",
+                        "trailing_pe": _fmt(db_row.get("pe_ratio") if db_row else info.get("trailingPE")),
+                        "forward_pe": _fmt(info.get("forwardPE")) if not db_row else _fmt(db_row.get("pe_ratio")),
+                        "rev_growth": _pct((db_row.get("fcf_5y_growth") if db_row else info.get("revenueGrowth"))),
+                        "gross_margin": _pct((db_row.get("operating_margin") if db_row else info.get("grossMargins"))),
+                        "db_price": _fmt(db_price),
                     }
                 )
             except Exception:
@@ -164,7 +176,7 @@ def get_sector_peer_snapshot(ticker: str, max_peers: int = 6) -> str:
             ),
             (
                 f"{'Ticker':8} {'Name':28} {'MktCap':>12} {'PE':>8} "
-                f"{'FwdPE':>8} {'RevG':>8} {'GrossM':>8}"
+                f"{'FwdPE':>8} {'RevG':>8} {'GrossM':>8} {'DBPx':>8}"
             ),
             "-" * 92,
         ]
@@ -174,9 +186,12 @@ def get_sector_peer_snapshot(ticker: str, max_peers: int = 6) -> str:
             lines.append(
                 f"{r['symbol'][:8]:8} {r['name'][:28]:28} {r['market_cap'][:12]:>12} "
                 f"{r['trailing_pe'][:8]:>8} {r['forward_pe'][:8]:>8} "
-                f"{r['rev_growth'][:8]:>8} {r['gross_margin'][:8]:>8}"
+                f"{r['rev_growth'][:8]:>8} {r['gross_margin'][:8]:>8} {r.get('db_price','N/A')[:8]:>8}"
             )
         lines.append(f"Peer tickers for comps: {', '.join(peer_syms) if peer_syms else 'N/A'}")
+        lines.append("")
+        lines.append("Local financials snapshot:")
+        lines.append(format_financial_snapshot(base_ticker))
         return "\n".join(lines)
     except ImportError:
         return f"[{ticker}] yfinance not installed — sector/peer snapshot unavailable."
