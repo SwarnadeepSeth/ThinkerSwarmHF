@@ -20,6 +20,9 @@ class TradingState(TypedDict):
     # ── Shared Researcher Context ──────────────────────────────────────────────
     researcher_context: str
 
+    # ── Sentiment Wing Context ─────────────────────────────────────────────────
+    sentiment_context: str
+
     # ── Quantitative Wing ──────────────────────────────────────────────────────
     quant_bull_findings: str
     quant_bear_findings: str
@@ -47,6 +50,7 @@ class TradingState(TypedDict):
     # Annotated with _merge_dicts so parallel wing updates don't overwrite each other
     technical_analysis:   Annotated[Dict[str, Any], _merge_dicts]
     fundamental_analysis: Annotated[Dict[str, Any], _merge_dicts]
+    sentiment_analysis:   Annotated[Dict[str, Any], _merge_dicts]
 
     # ── Review & Routing ──────────────────────────────────────────────────────
     reviewer_feedback: str

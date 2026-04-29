@@ -1,12 +1,12 @@
 """
-ThinkerSwarm Graph — two-wing architecture
+ThinkerSwarm Graph — sentiment + two-wing architecture
 ==========================================
 
-START → manager → researcher
-                      │
-            ┌─────────┴──────────┐   (parallel fan-out)
-            ▼                    ▼
-        quant_head           fund_head
+START → manager → researcher → sentiment
+                                     │
+            ┌────────────────────────┴────────────────────────┐   (parallel fan-out)
+            ▼                                                 ▼
+        quant_head                                         fund_head
             │                    │
       quant_bull_worker    fund_bull_worker
             │                    │
@@ -28,6 +28,7 @@ from core.state import TradingState
 
 from agents.manager import manager_node, manager_decision_node
 from agents.specialists import researcher_node
+from agents.sentiment import sentiment_node
 from agents.heads import (
     quant_head_node,
     quant_head_synthesis_node,
@@ -47,6 +48,7 @@ builder = StateGraph(TradingState)
 # ── Register nodes ────────────────────────────────────────────────────────────
 builder.add_node("manager",               manager_node)
 builder.add_node("researcher",            researcher_node)
+builder.add_node("sentiment",             sentiment_node)
 
 # Quantitative wing
 builder.add_node("quant_head",            quant_head_node)
@@ -70,9 +72,10 @@ builder.add_node("reviewer",              reviewer_node)
 builder.add_edge(START,        "manager")
 builder.add_edge("manager",    "researcher")
 
-# Fan-out: researcher → both wings in parallel
-builder.add_edge("researcher", "quant_head")
-builder.add_edge("researcher", "fund_head")
+# Fan-out: researcher → sentiment → both wings in parallel
+builder.add_edge("researcher", "sentiment")
+builder.add_edge("sentiment",  "quant_head")
+builder.add_edge("sentiment",  "fund_head")
 
 # Quantitative wing (sequential within the wing)
 builder.add_edge("quant_head",           "quant_bull_worker")

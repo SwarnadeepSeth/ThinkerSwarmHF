@@ -108,6 +108,7 @@ def _base_context(state: TradingState) -> str:
         f"Market Context: {state.get('market_context', 'N/A')}\n"
         f"Manager Brief: {state.get('manager_brief', 'N/A')}\n"
         f"Researcher Context: {state.get('researcher_context', 'N/A')[:600]}\n"
+        f"Sentiment Context: {state.get('sentiment_context', 'N/A')[:600]}\n"
     )
 
 

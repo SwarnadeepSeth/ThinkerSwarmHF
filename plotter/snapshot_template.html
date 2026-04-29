@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>QuantJuice Snapshot</title>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0b0f1a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #ccc;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  #topbar {
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 18px; background: #161b22; border-bottom: 1px solid #30363d;
+    flex-shrink: 0; height: 44px;
+  }
+  #topbar .logo { font-size: 12px; color: #58a6ff; font-weight: bold; letter-spacing: 1px; margin-right: 4px; }
+  #topbar .ticker { font-size: 17px; font-weight: bold; color: #e6edf3; }
+  #topbar .date-range { font-size: 11px; color: #8b949e; }
+  #topbar .price-display { font-size: 14px; color: #3fb950; font-weight: bold; margin-left: auto; }
+  #topbar .ema-legend { font-size: 11px; display: flex; gap: 12px; align-items: center; }
+  .ema-dot { display: inline-block; width: 20px; height: 2px; border-radius: 1px; vertical-align: middle; margin-right: 3px; }
+  #app-body { display: flex; flex: 1; overflow: hidden; }
+  #panels { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+  #chart-wrapper { flex: 1 1 auto; min-height: 150px; position: relative; overflow: hidden; }
+  #chart { width: 100%; height: 100%; }
+  .indicator-wrapper { flex: 0 0 auto; position: relative; overflow: hidden; }
+  .indicator-chart { width: 100%; height: 100%; }
+  .panel-label { position: absolute; top: 4px; left: 10px; font-size: 11px; color: #8b949e; z-index: 10; pointer-events: none; }
+  .resizer { height: 1px; background: #1a2030; flex: 0 0 auto; }
+  #indicators-container { display: flex; flex-direction: column; flex: 0 0 auto; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <span class="logo">⚡ QuantJuice Pro</span>
+  <span class="ticker" id="ticker-name">—</span>
+  <span class="date-range" id="date-range">—</span>
+  <span class="ema-legend">
+    <span><span class="ema-dot" style="background:#f5d300;"></span>EMA 20</span>
+    <span><span class="ema-dot" style="background:#ff9800;"></span>EMA 50</span>
+  </span>
+  <div class="price-display" id="last-price">—</div>
+</div>
+
+<div id="app-body">
+  <div id="panels">
+    <div id="chart-wrapper" data-chart-id="main">
+      <div id="chart"></div>
+    </div>
+    <div id="indicators-container"></div>
+  </div>
+</div>
+
+<script>
+// ======================== MATH ========================
+function SMA(period, data) {
+  let res = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) { res.push({time: data[i].time, value: NaN}); continue; }
+    let sum = 0;
+    for (let j = 0; j < period; j++) sum += (data[i-j].value !== undefined ? data[i-j].value : data[i-j].close);
+    res.push({time: data[i].time, value: sum / period});
+  }
+  return res;
+}
+
+function EMA(period, data) {
+  if (!data || !data.length) return [];
+  const k = 2 / (period + 1);
+  const getVal = d => d.close !== undefined ? d.close : d.value;
+  let prev = getVal(data[0]);
+  return data.map((d, i) => {
+    const val = i === 0 ? prev : getVal(d) * k + prev * (1 - k);
+    prev = val;
+    return {time: d.time, value: val};
+  });
+}
+
+function RSI_TV(period, data) {
+  let result = [];
+  if (!data || !data.length) return result;
+  let avgGain = 0, avgLoss = 0;
+  result.push({time: data[0].time, value: 50});
+  for (let i = 1; i < data.length; i++) {
+    let change = data[i].close - data[i-1].close;
+    let gain = change > 0 ? change : 0;
+    let loss = change < 0 ? -change : 0;
+    if (i === 1) { avgGain = gain; avgLoss = loss; }
+    else { avgGain = (avgGain * (period - 1) + gain) / period; avgLoss = (avgLoss * (period - 1) + loss) / period; }
+    let rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    result.push({time: data[i].time, value: avgLoss === 0 ? 100 : 100 - (100 / (1 + rs))});
+  }
+  return result;
+}
+
+function MACD(fast, slow, sig, data) {
+  let emaFast = EMA(fast, data), emaSlow = EMA(slow, data), macdLine = [];
+  for (let i = 0; i < data.length; i++)
+    macdLine.push({time: data[i].time, value: emaFast[i].value - emaSlow[i].value});
+  let signalInput = macdLine.map(x => ({time: x.time, close: x.value}));
+  let signalLine = EMA(sig, signalInput), histogram = [];
+  for (let i = 0; i < macdLine.length; i++) {
+    let m = macdLine[i].value, s = signalLine[i].value;
+    histogram.push({time: macdLine[i].time, value: m - s, color: (m - s) >= 0 ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)'});
+  }
+  return {macdLine, signalLine, histogram};
+}
+
+// ======================== GLOBAL STATE ========================
+let globalData = [], currentData = [], chartInstances = {}, isSyncing = false;
+let panelCounter = 0;
+
+const darkTheme = {
+  layout: {background: {color: '#0b0f1a'}, textColor: '#ccc'},
+  grid: {vertLines: {color: '#1a2030'}, horzLines: {color: '#1a2030'}},
+  rightPriceScale: {borderColor: '#30363d', scaleMargins: {top: 0.1, bottom: 0.1}},
+  timeScale: {borderColor: '#30363d', timeVisible: true, secondsVisible: false}
+};
+
+function getBaseChartOptions() {
+  return {...darkTheme, crosshair: {mode: LightweightCharts.CrosshairMode.Normal}};
+}
+
+const resizeObserver = new ResizeObserver(entries => {
+  for (let entry of entries) {
+    const id = entry.target.dataset.chartId;
+    if (id && chartInstances[id]) {
+      chartInstances[id].chart.resize(entry.contentRect.width, entry.contentRect.height);
+    }
+  }
+});
+
+function registerChartForSync(id, chartObj) {
+  chartInstances[id] = {chart: chartObj, primarySeries: null, dataMap: new Map()};
+  chartObj.timeScale().subscribeVisibleLogicalRangeChange(range => {
+    if (!range || isSyncing) return;
+    isSyncing = true;
+    Object.values(chartInstances).forEach(c => {
+      if (c.chart !== chartObj) c.chart.timeScale().setVisibleLogicalRange(range);
+    });
+    isSyncing = false;
+  });
+}
+
+function updateTimeScaleVisibility() {
+  const panels = ['main'];
+  Array.from(document.getElementById('indicators-container').children).forEach(child => {
+    const wrapper = child.querySelector('.indicator-wrapper');
+    if (wrapper && wrapper.dataset.chartId) panels.push(wrapper.dataset.chartId);
+  });
+  panels.forEach((id, index) => {
+    const isLast = index === panels.length - 1;
+    if (chartInstances[id] && chartInstances[id].chart) {
+      chartInstances[id].chart.applyOptions({
+        timeScale: {
+          visible: isLast,
+          tickMarkFormatter: (time, tickMarkType, locale) => {
+            const d = new Date(time * 1000);
+            return d.toLocaleDateString(locale, {month: 'short', year: 'numeric'});
+          }
+        }
+      });
+    }
+  });
+}
+
+function createPanelUI(titleText, height) {
+  const id = `panel_${panelCounter++}`;
+  const container = document.getElementById('indicators-container');
+  const group = document.createElement('div');
+  group.style.cssText = 'display:flex; flex-direction:column;';
+  const sep = document.createElement('div'); sep.className = 'resizer';
+  const wrapper = document.createElement('div');
+  wrapper.className = 'indicator-wrapper';
+  wrapper.id = `wrapper_${id}`;
+  wrapper.dataset.chartId = id;
+  wrapper.style.height = `${height}px`;
+  const label = document.createElement('div'); label.className = 'panel-label'; label.textContent = titleText;
+  const chartDiv = document.createElement('div'); chartDiv.className = 'indicator-chart'; chartDiv.id = `chart_${id}`;
+  wrapper.appendChild(label); wrapper.appendChild(chartDiv);
+  group.appendChild(sep); group.appendChild(wrapper);
+  container.appendChild(group);
+  const subChart = LightweightCharts.createChart(chartDiv, getBaseChartOptions());
+  registerChartForSync(id, subChart);
+  resizeObserver.observe(wrapper);
+  return {id, subChart};
+}
+
+function addLineRef(chart, val, color) {
+  const s = chart.addLineSeries({color: 'transparent', lastValueVisible: false, priceLineVisible: false});
+  s.setData([{time: currentData[0].time, value: val}, {time: currentData[currentData.length - 1].time, value: val}]);
+  s.createPriceLine({price: val, color, lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: false});
+  return s;
+}
+
+function createVolume() {
+  const {id, subChart} = createPanelUI('Volume', 100);
+  const volSeries = subChart.addHistogramSeries({priceFormat: {type: 'volume'}});
+  const volData = currentData.map(d => ({
+    time: d.time, value: d.volume,
+    color: d.close > d.open ? 'rgba(0,255,153,0.6)' : 'rgba(255,77,77,0.6)'
+  }));
+  volSeries.setData(volData);
+  const dataMap = new Map(); volData.forEach(d => dataMap.set(d.time, d.value));
+  chartInstances[id].primarySeries = volSeries; chartInstances[id].dataMap = dataMap;
+  updateTimeScaleVisibility();
+}
+
+function createRSI() {
+  const {id, subChart} = createPanelUI('RSI (14)', 120);
+  const rsiSeries = subChart.addLineSeries({color: '#c678dd', lineWidth: 2, priceLineVisible: false});
+  const rsiData = RSI_TV(14, currentData);
+  rsiSeries.setData(rsiData);
+  addLineRef(subChart, 70, 'rgba(224,108,117,0.5)');
+  addLineRef(subChart, 30, 'rgba(63,185,80,0.5)');
+  const dataMap = new Map(); rsiData.forEach(d => dataMap.set(d.time, d.value));
+  chartInstances[id].primarySeries = rsiSeries; chartInstances[id].dataMap = dataMap;
+  updateTimeScaleVisibility();
+}
+
+function createMACD() {
+  const {id, subChart} = createPanelUI('MACD (12,26,9)', 120);
+  const histSeries = subChart.addHistogramSeries({priceFormat: {type: 'volume'}});
+  const macdSeries = subChart.addLineSeries({color: '#58a6ff', lineWidth: 1.5, priceLineVisible: false});
+  const sigSeries = subChart.addLineSeries({color: '#ff9800', lineWidth: 1.5, priceLineVisible: false});
+  const res = MACD(12, 26, 9, currentData);
+  macdSeries.setData(res.macdLine); sigSeries.setData(res.signalLine); histSeries.setData(res.histogram);
+  const dataMap = new Map(); res.macdLine.forEach(d => dataMap.set(d.time, d.value));
+  chartInstances[id].primarySeries = macdSeries; chartInstances[id].dataMap = dataMap;
+  updateTimeScaleVisibility();
+}
+
+// ======================== INIT ========================
+(function () {
+  globalData = window.__CHART_DATA__ || [];
+  if (!globalData.length) { window.__CHART_READY__ = true; return; }
+  globalData.sort((a, b) => a.time - b.time);
+  currentData = [...globalData];
+
+  const ticker = window.__TICKER__ || '—';
+  document.getElementById('ticker-name').textContent = ticker;
+  document.getElementById('last-price').textContent = currentData[currentData.length - 1].close.toFixed(2);
+
+  const fmt = t => new Date(t * 1000).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+  document.getElementById('date-range').textContent =
+    `${fmt(currentData[0].time)} – ${fmt(currentData[currentData.length - 1].time)}`;
+
+  const opts = getBaseChartOptions();
+  const mainChart = LightweightCharts.createChart(document.getElementById('chart'), {
+    ...opts,
+    rightPriceScale: {...opts.rightPriceScale, scaleMargins: {top: 0.05, bottom: 0.05}}
+  });
+  registerChartForSync('main', mainChart);
+  resizeObserver.observe(document.getElementById('chart-wrapper'));
+
+  const candleSeries = mainChart.addCandlestickSeries({
+    upColor: '#00ff99', downColor: '#ff4d4d',
+    wickUpColor: '#00ff99', wickDownColor: '#ff4d4d',
+    borderVisible: false
+  });
+  candleSeries.setData(currentData);
+  chartInstances['main'].primarySeries = candleSeries;
+
+  const ema20 = EMA(20, currentData);
+  const ema20Series = mainChart.addLineSeries({color: '#f5d300', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false});
+  ema20Series.setData(ema20.filter(d => !isNaN(d.value)));
+
+  const ema50 = EMA(50, currentData);
+  const ema50Series = mainChart.addLineSeries({color: '#ff9800', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false});
+  ema50Series.setData(ema50.filter(d => !isNaN(d.value)));
+
+  setTimeout(() => {
+    createVolume();
+    createRSI();
+    createMACD();
+    setTimeout(() => { window.__CHART_READY__ = true; }, 500);
+  }, 50);
+})();
+</script>
+</body>
+</html>

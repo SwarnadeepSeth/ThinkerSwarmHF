@@ -1,4 +1,5 @@
 import argparse
+import base64
 import json
 import os
 import re
@@ -11,6 +12,13 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from agents.print_utils import render_kv_table
 from tools.financial_db import set_financial_db_path, resolve_financial_db_path
+from tools.sentiment_tools import set_sentiment_db_path, resolve_sentiment_db_path
+
+try:
+    from plotter.snapshot import take_snapshot
+    SNAPSHOT_AVAILABLE = True
+except Exception:
+    SNAPSHOT_AVAILABLE = False
 
 # Load environment variables (NVIDIA_API_KEY)
 load_dotenv()
@@ -278,6 +286,13 @@ def generate_docx_report(ticker: str, out_data: dict, decision: dict):
         _add_verbatim_section(doc, "Sector & Peer Comparative Context", sector_peer_context)
     if internet_context:
         _add_verbatim_section(doc, "Internet Search Context", internet_context)
+    sentiment_analysis = out_data.get("sentiment_analysis", {}) or {}
+    raw_sentiment_context = sentiment_analysis.get("raw_sentiment_context", "")
+    sentiment_brief = sentiment_analysis.get("sentiment_context", "")
+    if raw_sentiment_context:
+        _add_verbatim_section(doc, "Sentiment Database + Live News Context", raw_sentiment_context)
+    if sentiment_brief:
+        _add_verbatim_section(doc, "Sentiment Wing Brief", sentiment_brief)
 
     node_outputs = out_data.get("node_outputs", {}) or {}
     tool_sections = [
@@ -447,6 +462,17 @@ def generate_markdown_report(ticker: str, out_data: dict, decision: dict):
         lines.extend(["## Internet Search Context", "```"])
         lines.append(internet_context)
         lines.extend(["```", ""])
+    sentiment_analysis = out_data.get("sentiment_analysis", {}) or {}
+    raw_sentiment_context = sentiment_analysis.get("raw_sentiment_context", "")
+    sentiment_brief = sentiment_analysis.get("sentiment_context", "")
+    if raw_sentiment_context:
+        lines.extend(["## Sentiment Database + Live News Context", "```"])
+        lines.append(raw_sentiment_context)
+        lines.extend(["```", ""])
+    if sentiment_brief:
+        lines.extend(["## Sentiment Wing Brief", "```"])
+        lines.append(sentiment_brief)
+        lines.extend(["```", ""])
 
     node_outputs = out_data.get("node_outputs", {}) or {}
     tool_sections = [
@@ -498,6 +524,257 @@ def generate_markdown_report(ticker: str, out_data: dict, decision: dict):
     print(f"📝 Markdown report saved to {filename}")
 
 
+def generate_html_report(ticker: str, out_data: dict, decision: dict):
+    """Generate a styled HTML report with chart snapshot - includes all sections from MD/DOCX."""
+    chart_img = ""
+    if SNAPSHOT_AVAILABLE:
+        try:
+            db_path = "data/US_DB.db"
+            png_path = take_snapshot(ticker, db_path)
+            if png_path and os.path.exists(png_path):
+                with open(png_path, "rb") as f:
+                    chart_img = base64.b64encode(f.read()).decode("utf-8")
+        except Exception as e:
+            print(f"⚠️ Chart snapshot failed: {e}")
+
+    def row_html(label: str, value: str) -> str:
+        return f'<tr><td class="label">{label}</td><td class="value">{value}</td></tr>'
+
+    def escape_html(text: str) -> str:
+        if not text:
+            return ""
+        return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("|", "│")
+
+    meta_rows = row_html("Generated", time.strftime("%Y-%m-%d %H:%M:%S"))
+    meta_rows += row_html("Execution Time", f"{out_data.get('execution_time_ms', 0):.2f} ms")
+    meta_rows += row_html("Ticker", ticker)
+    meta_rows += row_html("Nodes Executed", ", ".join(out_data.get("nodes_executed", [])) or "None")
+    meta_rows += row_html("Status", f'<span class="status-{"error" if out_data.get("error") else "success"}">{"ERROR" if out_data.get("error") else "SUCCESS"}</span>')
+    if out_data.get("error"):
+        meta_rows += row_html("Error", out_data.get("error"))
+
+    decision_html = ""
+    if decision:
+        entry = float(decision.get("entry_price", 0) or 0)
+        stop = float(decision.get("stoploss", 0) or 0)
+        target = float(decision.get("target", 0) or 0)
+        rr = ""
+        if entry and stop and target:
+            risk = abs(entry - stop)
+            reward = abs(target - entry)
+            if risk:
+                rr = f"{reward / risk:.2f}x"
+        reasoning_text = decision.get("reasoning", "")
+        decision_rows = [
+            ("Direction", decision.get("direction", "N/A")),
+            ("Entry", f"${entry:,.2f}" if entry else "N/A"),
+            ("Stop", f"${stop:,.2f}" if stop else "N/A"),
+            ("Target", f"${target:,.2f}" if target else "N/A"),
+            ("Risk / Reward", rr or "N/A"),
+            ("Volatility", decision.get("risk_volatility", "N/A")),
+            ("Timeframe", decision.get("timeframe", "N/A")),
+            ("Reasoning", f'<div class="reasoning-box">{escape_html(reasoning_text)}</div>'),
+        ]
+        decision_html = "\n".join(row_html(label, val) for label, val in decision_rows)
+    else:
+        decision_html = '<tr><td colspan="2">No decision generated.</td></tr>'
+
+    tech_report = ""
+    fund_report = ""
+    for step in out_data.get("steps", []):
+        if step.get("node") == "quant_head_synthesis":
+            tech_report = step.get("llm_output", "") or ""
+        elif step.get("node") == "fund_head_synthesis":
+            fund_report = step.get("llm_output", "") or ""
+
+    tech_sections = []
+    for sec, txt in _extract_report_sections(tech_report, ["Rationale", "Bull Perspective", "Bear Perspective", "Risks", "Opportunities", "Priority", "Recommended Stop Loss", "Profit Target", "Time Horizon", "Overall Bias"]):
+        tech_sections.append(f"<tr><td class='section'>{sec}</td><td>{escape_html(txt)}</td></tr>")
+    tech_html = "\n".join(tech_sections) if tech_sections else "<tr><td colspan='2'>No technical analysis available.</td></tr>"
+
+    fund_sections = []
+    for sec, txt in _extract_report_sections(fund_report, ["Rationale", "Bull Perspective", "Bear Perspective", "Risks", "Opportunities", "Priority", "Recommended Stop Loss", "Profit Target", "Time Horizon", "Overall Bias"]):
+        fund_sections.append(f"<tr><td class='section'>{sec}</td><td>{escape_html(txt)}</td></tr>")
+    fund_html = "\n".join(fund_sections) if fund_sections else "<tr><td colspan='2'>No fundamental analysis available.</td></tr>"
+
+    fundamental_analysis = out_data.get("fundamental_analysis", {}) or {}
+    sector_peer_context = fundamental_analysis.get("sector_peer_context", "")
+    internet_context = fundamental_analysis.get("internet_context", "")
+
+    sector_html = ""
+    if sector_peer_context:
+        sector_html = f'<div class="code-block"><pre>{escape_html(sector_peer_context)}</pre></div>'
+    else:
+        sector_html = '<p class="empty">No sector/peer context available.</p>'
+
+    internet_html = ""
+    if internet_context:
+        internet_html = f'<div class="code-block"><pre>{escape_html(internet_context)}</pre></div>'
+    else:
+        internet_html = '<p class="empty">No internet search context available.</p>'
+
+    sentiment_analysis = out_data.get("sentiment_analysis", {}) or {}
+    raw_sentiment_context = sentiment_analysis.get("raw_sentiment_context", "")
+    sentiment_brief = sentiment_analysis.get("sentiment_context", "")
+
+    sentiment_html = ""
+    if raw_sentiment_context:
+        sentiment_html = f'<div class="code-block"><pre>{escape_html(raw_sentiment_context)}</pre></div>'
+    else:
+        sentiment_html = '<p class="empty">No sentiment data available.</p>'
+
+    sentiment_brief_html = ""
+    if sentiment_brief:
+        sentiment_brief_html = f'<div class="code-block"><pre>{escape_html(sentiment_brief)}</pre></div>'
+    else:
+        sentiment_brief_html = '<p class="empty">No sentiment brief available.</p>'
+
+    node_outputs = out_data.get("node_outputs", {}) or {}
+    tool_html = ""
+    tool_sections = [
+        ("Quantitative Bull Tool Stack", node_outputs.get("quant_bull_worker", {}).get("tool_results", {})),
+        ("Quantitative Bear Tool Stack", node_outputs.get("quant_bear_worker", {}).get("tool_results", {})),
+        ("Fundamental Bull Tool Stack", node_outputs.get("fund_bull_worker", {}).get("tool_results", {})),
+        ("Fundamental Bear Tool Stack", node_outputs.get("fund_bear_worker", {}).get("tool_results", {})),
+        ("Quant Core Tool Stack", node_outputs.get("quant", {}).get("tool_results", {})),
+    ]
+    for name, results in tool_sections:
+        rows = _extract_tool_rows(results)
+        if rows:
+            tool_html += f"<h3>{name}</h3>\n<table class='tools'><thead><tr><th>Tool</th><th>Result</th></tr></thead><tbody>\n"
+            for tool, result in rows:
+                tool_html += f"<tr><td class='tool'>{escape_html(tool)}</td><td>{escape_html(result)}</td></tr>\n"
+            tool_html += "</tbody></table>\n"
+
+    step_rows = []
+    for step in out_data.get("steps", []):
+        output = step.get("llm_output", "")
+        if isinstance(output, dict):
+            output = json.dumps(output, ensure_ascii=False)
+        step_rows.append([
+            step.get("node", "unknown"),
+            step.get("model_used", "unknown"),
+            f"{step.get('timestamp', 0):.2f}s",
+            _truncate_for_md(output, 220) if output else "",
+        ])
+    steps_html = ""
+    if step_rows:
+        steps_html = "<table class='steps'><thead><tr><th>Node</th><th>Model</th><th>Duration</th><th>Preview</th></tr></thead><tbody>\n"
+        for node, model, duration, preview in step_rows:
+            steps_html += f"<tr><td>{escape_html(node)}</td><td>{escape_html(model)}</td><td>{escape_html(duration)}</td><td>{escape_html(preview)}</td></tr>\n"
+        steps_html += "</tbody></table>"
+
+    tech_full_html = f'<div class="code-block full-report"><pre>{escape_html(tech_report)}</pre></div>' if tech_report else '<p class="empty">No technical wing report available.</p>'
+    fund_full_html = f'<div class="code-block full-report"><pre>{escape_html(fund_report)}</pre></div>' if fund_report else '<p class="empty">No fundamental wing report available.</p>'
+
+    tool_summary_rows = _collect_tool_summary_rows(node_outputs)
+    tool_summary_html = ""
+    if tool_summary_rows:
+        tool_summary_html = "<table class='tool-summary'><thead><tr><th>Node</th><th>Tools Used</th><th>Count</th></tr></thead><tbody>\n"
+        for node_name, tool_names, count in tool_summary_rows:
+            tool_summary_html += f"<tr><td>{escape_html(node_name)}</td><td>{escape_html(tool_names)}</td><td>{escape_html(count)}</td></tr>\n"
+        tool_summary_html += "</tbody></table>"
+
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Analysis Report: {ticker}</title>
+<style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0b0f1a; color: #e6edf3; line-height: 1.6; padding: 40px; }}
+    .container {{ max-width: 1200px; margin: 0 auto; }}
+    h1 {{ color: #58a6ff; font-size: 28px; margin-bottom: 8px; }}
+    h2 {{ color: #f5d300; font-size: 18px; margin: 30px 0 15px; border-bottom: 1px solid #30363d; padding-bottom: 8px; }}
+    h3 {{ color: #8b949e; font-size: 14px; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px; }}
+    table {{ width: 100%; border-collapse: collapse; margin: 15px 0; background: #161b22; border-radius: 8px; overflow: hidden; }}
+    th, td {{ padding: 12px 16px; text-align: left; border-bottom: 1px solid #30363d; }}
+    th {{ background: #21262d; color: #8b949e; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }}
+    td.label {{ color: #8b949e; width: 180px; font-weight: 500; }}
+    td.value {{ color: #e6edf3; }}
+    td.section {{ color: #58a6ff; width: 160px; }}
+    td.tool {{ color: #c9a0fa; width: 140px; }}
+    .status-success {{ color: #3fb950; font-weight: bold; }}
+    .status-error {{ color: #f85149; font-weight: bold; }}
+    .chart-container {{ margin: 30px 0; text-align: center; }}
+    .chart-container img {{ max-width: 100%; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }}
+    .meta {{ color: #8b949e; font-size: 13px; margin-bottom: 30px; }}
+    .reasoning-box {{ background: #161b22; padding: 16px; border-radius: 8px; border-left: 3px solid #f5d300; margin-top: 8px; white-space: pre-wrap; }}
+    .code-block {{ background: #161b22; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 15px 0; }}
+    .code-block pre {{ margin: 0; font-size: 12px; font-family: "SF Mono", Monaco, "Courier New", monospace; color: #8b949e; white-space: pre-wrap; word-wrap: break-word; }}
+    .full-report pre {{ color: #e6edf3; max-height: 400px; overflow-y: auto; }}
+    .empty {{ color: #8b949e; font-style: italic; }}
+    .footer {{ margin-top: 40px; padding-top: 20px; border-top: 1px solid #30363d; color: #8b949e; font-size: 12px; text-align: center; }}
+    .appendix {{ margin-top: 40px; border-top: 2px dashed #30363d; padding-top: 20px; }}
+    .appendix h2 {{ color: #8b949e; }}
+    @media print {{ body {{ background: white; color: black; }} table {{ background: white; }} .code-block {{ background: #f5f5f5; }} }}
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>⚡ Trading Analysis Report: {ticker}</h1>
+    <p class="meta">Generated {time.strftime("%Y-%m-%d at %H:%M:%S")}</p>
+'''
+
+    if chart_img:
+        html += f'    <div class="chart-container"><img src="data:image/png;base64,{chart_img}" alt="Price Chart"></div>\n'
+
+    html += f'''    <h2>Run Metadata</h2>
+    <table><tbody>{meta_rows}</tbody></table>
+
+    <h2>Final Trade Setup</h2>
+    <table><tbody>{decision_html}</tbody></table>
+
+    <h2>Technical Wing Highlights</h2>
+    <table><tbody>{tech_html}</tbody></table>
+
+    <h2>Fundamental Wing Highlights</h2>
+    <table><tbody>{fund_html}</tbody></table>
+
+    <h2>Sector & Peer Comparative Context</h2>
+    {sector_html}
+
+    <h2>Internet Search Context</h2>
+    {internet_html}
+
+    <h2>Sentiment Database + Live News Context</h2>
+    {sentiment_html}
+
+    <h2>Sentiment Wing Brief</h2>
+    {sentiment_brief_html}
+
+    <h2>Tool Results</h2>
+'''
+    html += tool_html
+
+    html += f'''    <h2>Execution Steps</h2>
+    {steps_html}
+
+    <div class="appendix">
+    <h2>Appendix - Full Technical Wing Report</h2>
+    {tech_full_html}
+
+    <h2>Appendix - Full Fundamental Wing Report</h2>
+    {fund_full_html}
+'''
+
+    if tool_summary_html:
+        html += f'''    <h2>Appendix - Tool Calls by Node</h2>
+    {tool_summary_html}
+'''
+
+    html += f'''    <div class="footer">Generated by ThinkerSwarm HF • QuantJuice Pro</div>
+</div>
+</body>
+</html>'''
+
+    filename = f"{ticker}_analysis_report.html"
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"📊 HTML report saved to {filename}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Autonomous AI Trading Agent Framework"
@@ -513,6 +790,12 @@ def main():
         type=str,
         default="",
         help="Path to the fundamental SQLite database (default: data/financials.db)",
+    )
+    parser.add_argument(
+        "--sentiment-db",
+        type=str,
+        default="",
+        help="Path to the sentiment SQLite database (default: data/sentiments.db)",
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose debug output"
@@ -537,9 +820,16 @@ def main():
         financial_db_path = args.financial_db or "data/financials.db"
     set_financial_db_path(financial_db_path)
 
+    sentiment_db_path = resolve_sentiment_db_path(args.sentiment_db or None)
+    if not sentiment_db_path:
+        print("⚠️ Warning: sentiment database not found. Sentiment wing will fall back to live news only.")
+        sentiment_db_path = args.sentiment_db or "data/sentiments.db"
+    set_sentiment_db_path(sentiment_db_path)
+
     print_header(f"🚀 Initializing Framework for {args.ticker.upper()}", args.verbose)
     print(f"🔌 Connected to database: {args.db}")
     print(f"💼 Financial database: {financial_db_path}")
+    print(f"🧠 Sentiment database: {sentiment_db_path}")
     print(f"🌐 Research web search: {'ENABLED' if args.research_web else 'DISABLED'}")
     if args.verbose:
         print(f"📋 Verbose mode: ENABLED")
@@ -554,6 +844,7 @@ def main():
         "ticker": args.ticker.upper(),
         "db_path": args.db,
         "financial_db_path": financial_db_path,
+        "sentiment_db_path": sentiment_db_path,
         "verbose": args.verbose,
         "allow_research_web": args.research_web,
         "iteration_count": 0,
@@ -561,6 +852,9 @@ def main():
         "manager_brief": "",
         # Researcher
         "researcher_context": "",
+        # Sentiment wing
+        "sentiment_context": "",
+        "sentiment_analysis": {},
         # Quantitative wing
         "quant_bull_findings": "",
         "quant_bear_findings": "",
@@ -658,6 +952,7 @@ def main():
         "steps": steps,
         "node_outputs": node_outputs,
         "fundamental_analysis": final_state.get("fundamental_analysis", {}) if final_state else {},
+        "sentiment_analysis": final_state.get("sentiment_analysis", {}) if final_state else {},
         "final_decision": decision,
         "error": error_msg if error_msg else None,
     }
@@ -670,6 +965,7 @@ def main():
     # 5. Generate DOCX report
     generate_docx_report(args.ticker.upper(), out_data, decision)
     generate_markdown_report(args.ticker.upper(), out_data, decision)
+    generate_html_report(args.ticker.upper(), out_data, decision)
 
 
 if __name__ == "__main__":

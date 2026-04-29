@@ -70,6 +70,7 @@ def manager_decision_node(state: TradingState):
 
     quant_report = state.get("quant_wing_report", "No quantitative report.")
     fund_report  = state.get("fund_wing_report",  "No fundamental report.")
+    sentiment_ctx = state.get("sentiment_context", "No sentiment brief.")
 
     section_divider("Wing Reports Received")
     print(f"    📊 Quant Report   : {len(quant_report):,} chars")
@@ -80,6 +81,7 @@ def manager_decision_node(state: TradingState):
         f"Review both wing reports for {ticker} and make the final call.\n\n"
         f"QUANTITATIVE / TECHNICAL WING REPORT:\n{quant_report}\n\n"
         f"FUNDAMENTAL WING REPORT:\n{fund_report}\n\n"
+        f"SENTIMENT WING BRIEF:\n{sentiment_ctx}\n\n"
         "Synthesize these into a single, decisive trade brief for the Risk Reviewer. Include:\n"
         "- Overall direction: LONG, SHORT, or NEUTRAL\n"
         "- Conviction level (High / Medium / Low) and reasoning\n"

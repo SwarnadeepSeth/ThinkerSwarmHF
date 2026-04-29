@@ -1,6 +1,6 @@
 # ThinkerSwarmHF
 
-ThinkerSwarmHF is a multi-agent trading analysis framework built around LangGraph. It combines a Researcher, Quantitative wing, Fundamental wing, Manager, and Reviewer to produce risk-managed trade setups plus written reports.
+ThinkerSwarmHF is a multi-agent trading analysis framework built around LangGraph. It combines a Researcher, Sentiment wing, Quantitative wing, Fundamental wing, Manager, and Reviewer to produce risk-managed trade setups plus written reports.
 
 ## What it does
 
@@ -20,6 +20,7 @@ ThinkerSwarmHF/
 │   ├── graph.py
 │   └── state.py
 ├── agents/                     # Node logic for manager, researcher, heads, workers, reviewer
+│   ├── sentiment.py
 │   ├── specialists.py
 │   ├── heads.py
 │   ├── wing_workers.py
@@ -28,6 +29,8 @@ ThinkerSwarmHF/
 │   ├── indicator_tools.py
 │   ├── fundamental_tools.py
 │   ├── research_tools.py
+│   ├── sentiment_tools.py
+│   ├── financial_db.py
 │   ├── file_tools.py
 │   └── sandbox.py
 ├── skills/                     # Active runtime instructions for agents
@@ -43,41 +46,44 @@ ThinkerSwarmHF/
 ## Runtime flow
 
 1. `main.py` loads configuration and builds the initial state.
-2. The Manager sets the market context and dispatches both wings.
+2. The Manager sets the market context and dispatches the Researcher.
 3. The Researcher reads `library/`, builds peer context, and optionally adds web context.
-4. The Quant wing evaluates regime, momentum, volatility, and structure tools.
-5. The Fundamental wing builds valuation, cash flow, balance sheet, and peer-comparison cases using `data/financials.db` first.
-6. The Manager reconciles both wings into a trade setup.
-7. The Reviewer checks risk/reward and returns the final JSON decision.
-8. `main.py` writes JSON, DOCX, and Markdown reports.
+4. The Sentiment wing reads `data/sentiments.db` plus live headlines and builds a sentiment brief.
+5. The Quant wing evaluates regime, momentum, volatility, and structure tools.
+6. The Fundamental wing builds valuation, cash flow, balance sheet, and peer-comparison cases using `data/financials.db` first.
+7. The Manager reconciles the wings into a trade setup.
+8. The Reviewer checks risk/reward and returns the final JSON decision.
+9. `main.py` writes JSON, DOCX, and Markdown reports.
 
 ```mermaid
 flowchart LR
     A[main.py / initial_state] --> B[Manager]
     B --> C[Researcher]
-    C --> D[Quant Head]
-    C --> E[Fundamental Head]
+    C --> D[Sentiment Wing]
+    D --> E[Quant Head]
+    D --> F[Fundamental Head]
 
-    D --> F[Quant Bull Worker]
-    D --> G[Quant Bear Worker]
-    E --> H[Fund Bull Worker]
-    E --> I[Fund Bear Worker]
+    E --> G[Quant Bull Worker]
+    E --> H[Quant Bear Worker]
+    F --> I[Fund Bull Worker]
+    F --> J[Fund Bear Worker]
 
-    F --> J[Quant Head Synthesis]
-    G --> J
-    H --> K[Fund Head Synthesis]
-    I --> K
+    G --> K[Quant Head Synthesis]
+    H --> K
+    I --> L[Fund Head Synthesis]
+    J --> L
 
-    J --> L[Manager Decision]
-    K --> L
-    L --> M[Reviewer]
-    M --> N[Final JSON + DOCX + MD]
+    K --> M[Manager Decision]
+    L --> M
+    M --> N[Reviewer]
+    N --> O[Final JSON + DOCX + MD]
 
-    C -. optional web search .-> O[Research Tools]
-    F -. indicator tools .-> P[Indicator Tools]
-    G -. indicator tools .-> P
-    H -. fundamental tools .-> Q[Fundamental Tools]
-    I -. fundamental tools .-> Q
+    C -. optional web search .-> P[Research Tools]
+    D -. sentiment db + live news .-> Q[Sentiment Tools]
+    E -. indicator tools .-> R[Indicator Tools]
+    G -. indicator tools .-> R
+    F -. fundamental tools .-> S[Fundamental Tools]
+    I -. fundamental tools .-> S
 ```
 
 ## Research and analysis inputs
@@ -86,6 +92,7 @@ flowchart LR
 - `prompts/` remains as a fallback mirror for compatibility.
 - The Researcher always performs local sector/peer comparison.
 - The Researcher and Fundamental wing prefer the local `financials.db` snapshot for valuation context.
+- The Sentiment wing prefers the local `sentiments.db` snapshot and supplements it with live headlines.
 - Web context is optional and enabled with `--research-web`.
 
 ## Reports
@@ -104,6 +111,7 @@ Both reports include:
 - execution step summaries
 - appendices with the full wing reports
 - raw sector/peer context and raw internet search context when enabled
+- raw sentiment database and live-news context
 
 ## Running the framework
 
@@ -119,6 +127,7 @@ Example:
 python main.py --ticker MSFT
 python main.py --ticker MSFT --research-web
 python main.py --ticker MSFT --financial-db data/financials.db
+python main.py --ticker MSFT --sentiment-db data/sentiments.db
 python main.py --ticker MSFT --db data/US_DB.db --verbose
 ```
 

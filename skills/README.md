@@ -11,4 +11,4 @@ Layout:
 - `skills/reviewer.txt`
 - `skills/heads/*.txt`
 - `skills/specialists/*.txt`
-
+- `skills/specialists/sentiment.txt`
